@@ -23,8 +23,8 @@ public class TwilightClaimsExpansion extends PlaceholderExpansion {
 
     @Override
     public String getIdentifier() {
-        // %twgc_*%
-        return "twgc";
+        // %tc_*%
+        return "tc";
     }
 
     @Override
@@ -76,19 +76,19 @@ public class TwilightClaimsExpansion extends PlaceholderExpansion {
         int hoursPoints = hours * cfg.getPerHourPoints();
 
         switch (params) {
-            case "points_total":       // %twgc_points_total%
+            case "points_total":       // %tc_points_total%
                 return String.valueOf(total);
-            case "points_used":        // %twgc_points_used%
+            case "points_used":        // %tc_points_used%
                 return String.valueOf(used);
-            case "points_free":        // %twgc_points_free%
+            case "points_free":        // %tc_points_free%
                 return String.valueOf(free);
-            case "points_purchased":   // %twgc_points_purchased%
+            case "points_purchased":   // %tc_points_purchased%
                 return String.valueOf(purchased);
-            case "points_hours":       // %twgc_points_hours%
+            case "points_hours":       // %tc_points_hours%
                 return String.valueOf(hoursPoints);
-            case "points_hours_played":// %twgc_points_hours_played%
+            case "points_hours_played":// %tc_points_hours_played%
                 return String.valueOf(hours);
-            case "points_per_hour":    // %twgc_points_per_hour%
+            case "points_per_hour":    // %tc_points_per_hour%
                 return String.valueOf(cfg.getPerHourPoints());
             default:
                 return null; // null placeholder
