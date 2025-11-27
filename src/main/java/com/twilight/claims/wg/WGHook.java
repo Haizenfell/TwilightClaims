@@ -38,6 +38,21 @@ public class WGHook {
         for (ProtectedRegion region : set) return region;
         return null;
     }
+    public Location getNearestPointInRegion(ProtectedRegion region, Location from) {
+
+        BlockVector3 min = region.getMinimumPoint();
+        BlockVector3 max = region.getMaximumPoint();
+
+        double x = from.getX();
+        double z = from.getZ();
+
+        double clampedX = Math.max(min.x(), Math.min(x, max.x()));
+        double clampedZ = Math.max(min.z(), Math.min(z, max.z()));
+
+        int y = from.getWorld().getHighestBlockYAt((int) clampedX, (int) clampedZ);
+
+        return new Location(from.getWorld(), clampedX + 0.5, y + 1, clampedZ + 0.5);
+    }
 
     public ProtectedRegion getRegionAt(Player p, Location loc) {
         RegionManager rm = getManager(loc.getWorld());

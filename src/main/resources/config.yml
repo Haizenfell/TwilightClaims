@@ -40,6 +40,8 @@ tools:
 stick-tool:
   enabled: true
   scan-radius: 100
+  visualize-radius: 50
+  visualize-duration: 5
 
   messages:
     unclaimed: "&9This block is not claimed."

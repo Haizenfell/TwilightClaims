@@ -1,5 +1,6 @@
 package com.twilight.claims.tool;
 
+import com.twilight.claims.TwilightClaims;
 import com.twilight.claims.config.ClaimsConfig;
 import com.twilight.claims.config.Messages;
 import com.twilight.claims.wg.WGHook;
@@ -64,8 +65,14 @@ public class StickToolListener implements Listener {
                         .replace("%area%", String.valueOf(area)));
     }
 
-
     private void handleRightClick(Player player, Location origin) {
+
+        // Если игрок уже в регионе → показываем левую информацию
+        ProtectedRegion current = wg.getRegionAt(origin);
+        if (current != null) {
+            handleLeftClick(player, origin);
+            return;
+        }
 
         ProtectedRegion nearest = wg.getClosestRegion(origin, cfg.stickScanRadius());
 
@@ -74,15 +81,15 @@ public class StickToolListener implements Listener {
             return;
         }
 
-        Location center = wg.getRegionCenter(nearest, origin.getWorld());
-        double dist = center.distance(origin);
+        Location nearestPoint = wg.getNearestPointInRegion(nearest, origin);
+        double dist = nearestPoint.distance(origin);
 
         String owner = nearest.getOwners().getUniqueIds().stream()
                 .findFirst()
                 .map(id -> Bukkit.getOfflinePlayer(id).getName())
                 .orElse("Unknown");
 
-        String arrow = getDirectionArrow(player, center);
+        String arrow = getDirectionArrow(player, nearestPoint);
 
         String text = cfg.stickMsgNearest()
                 .replace("%owner%", owner)
@@ -90,8 +97,13 @@ public class StickToolListener implements Listener {
                 .replace("%arrow%", arrow);
 
         sendAction(player, color(text));
-    }
 
+        if (dist <= cfg.stickVisualizeRadius()) {
+            TwilightClaims.getInstance()
+                    .getVisualizer()
+                    .showErrorTemporary(player, nearest, cfg.stickVisualizeDuration());
+        }
+    }
 
     private String getDirectionArrow(Player player, Location target) {
 

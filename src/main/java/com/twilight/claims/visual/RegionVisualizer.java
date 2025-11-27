@@ -71,6 +71,29 @@ public class RegionVisualizer {
             player.sendBlockChange(locations.get(i), materials.get(i).createBlockData());
         }
     }
+    public void showErrorTemporary(Player player, ProtectedRegion region, int seconds) {
+        UUID id = player.getUniqueId();
+
+        World world = player.getWorld();
+        List<Location> locations = new ArrayList<>();
+        List<Material> materials = new ArrayList<>();
+
+        addRegionVisualizationError(world, region, locations, materials);
+
+        for (int i = 0; i < locations.size(); i++) {
+            player.sendBlockChange(locations.get(i), materials.get(i).createBlockData());
+        }
+
+        Bukkit.getScheduler().runTaskLater(plugin, () -> {
+            for (Location loc : locations) {
+                player.sendBlockChange(loc, loc.getBlock().getBlockData());
+            }
+        }, seconds * 20L);
+    }
+    public void showErrorNearby(Player player, ProtectedRegion region) {
+        int sec = plugin.getConfig().getInt("visual.stick-error-highlight-seconds", 3);
+        showErrorTemporary(player, region, sec);
+    }
 
     public void showError(Player player, ProtectedRegion region) {
         UUID id = player.getUniqueId();

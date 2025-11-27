@@ -109,6 +109,13 @@ public class ClaimsConfig {
     public int stickScanRadius() {
         return plugin.getConfig().getInt("stick-tool.scan-radius", 100);
     }
+    public int stickVisualizeRadius() {
+        return plugin.getConfig().getInt("stick.visualize-radius", 50);
+    }
+
+    public int stickVisualizeDuration() {
+        return plugin.getConfig().getInt("stick.visualize-duration", 3);
+    }
 
     public String getStickArrowFront() {
         return plugin.getConfig().getString("stick-tool.arrows.front", "↑");
