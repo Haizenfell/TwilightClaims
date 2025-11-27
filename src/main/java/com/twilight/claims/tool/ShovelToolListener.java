@@ -3,11 +3,14 @@ package com.twilight.claims.tool;
 import com.sk89q.worldedit.math.BlockVector3;
 import com.sk89q.worldguard.protection.regions.ProtectedCuboidRegion;
 import com.sk89q.worldguard.protection.regions.ProtectedRegion;
+import com.twilight.claims.TwilightClaims;
 import com.twilight.claims.config.ClaimsConfig;
 import com.twilight.claims.config.Messages;
 import com.twilight.claims.manager.ClaimManager;
 import com.twilight.claims.visual.RegionVisualizer;
 import com.twilight.claims.wg.WGHook;
+import net.md_5.bungee.api.ChatMessageType;
+import net.md_5.bungee.api.chat.TextComponent;
 import org.bukkit.Bukkit;
 import org.bukkit.Location;
 import org.bukkit.World;
@@ -31,7 +34,8 @@ public class ShovelToolListener implements Listener {
     private final Map<UUID, CornerSelection> selectedCorners = new HashMap<>();
     private final Map<UUID, SideSelection> selectedSides = new HashMap<>();
 
-    public ShovelToolListener(ClaimsConfig cfg, Messages msg, WGHook wg, ClaimManager claim, RegionVisualizer visualizer) {
+    public ShovelToolListener(ClaimsConfig cfg, Messages msg, WGHook wg,
+                              ClaimManager claim, RegionVisualizer visualizer) {
         this.cfg = cfg;
         this.msg = msg;
         this.wg = wg;
@@ -66,7 +70,7 @@ public class ShovelToolListener implements Listener {
 
         ProtectedRegion region = wg.getRegionAt(player, click);
         if (region == null) {
-            msg.send(player, "no_region", s -> s);
+            sendAction(player, msg.msg("no_region"));
             event.setCancelled(true);
             return;
         }
@@ -74,7 +78,7 @@ public class ShovelToolListener implements Listener {
         UUID ownerId = player.getUniqueId();
         if (!region.getOwners().contains(ownerId)) {
             visualizer.showError(player, region);
-            msg.send(player, "not_owner", s -> s);
+            sendAction(player, msg.msg("not_owner"));
             event.setCancelled(true);
             return;
         }
@@ -92,8 +96,9 @@ public class ShovelToolListener implements Listener {
             selectedSides.remove(id);
             selectedCorners.put(id, new CornerSelection(region.getId(), clickedCorner));
 
-            msg.send(player, "select_corner",
-                    s -> s.replace("%corner%", formatCornerName(clickedCorner)));
+            String text = msg.msg("select_corner")
+                    .replace("%corner%", formatCornerName(clickedCorner));
+            sendAction(player, text);
 
             visualizer.show(player, region, clickedCorner);
             event.setCancelled(true);
@@ -104,8 +109,9 @@ public class ShovelToolListener implements Listener {
             selectedCorners.remove(id);
             selectedSides.put(id, new SideSelection(region.getId(), clickedSide));
 
-            msg.send(player, "select_side",
-                    s -> s.replace("%side%", formatSideName(clickedSide)));
+            String text = msg.msg("select_side")
+                    .replace("%side%", formatSideName(clickedSide));
+            sendAction(player, text);
 
             visualizer.show(player, region, null);
             event.setCancelled(true);
@@ -113,7 +119,7 @@ public class ShovelToolListener implements Listener {
         }
 
         visualizer.show(player, region, null);
-        msg.send(player, "click_inside_region", s -> s);
+        sendAction(player, msg.msg("click_inside_region"));
         event.setCancelled(true);
     }
 
@@ -189,8 +195,9 @@ public class ShovelToolListener implements Listener {
         int sizeZ = maxZ - minZ + 1;
 
         if (sizeX < 10 || sizeZ < 10) {
-            msg.send(player, "region_too_small",
-                    s -> s.replace("%min%", "10x10"));
+            String text = msg.msg("region_too_small")
+                    .replace("%min%", "10x10");
+            sendAction(player, text);
             return;
         }
 
@@ -202,9 +209,10 @@ public class ShovelToolListener implements Listener {
         int delta = newArea - oldArea;
 
         if (!claim.canExpand(player, delta)) {
-            msg.send(player, "not_enough_points",
-                    s -> s.replace("%need%", String.valueOf(delta))
-                            .replace("%free%", String.valueOf(claim.getFree(player))));
+            String text = msg.msg("not_enough_points")
+                    .replace("%need%", String.valueOf(delta))
+                    .replace("%free%", String.valueOf(claim.getFree(player)));
+            sendAction(player, text);
             return;
         }
 
@@ -220,11 +228,13 @@ public class ShovelToolListener implements Listener {
                     .map(id -> Bukkit.getOfflinePlayer(id).getName())
                     .orElse("Unknown");
 
-            msg.send(player, "region_too_close",
-                    s -> s.replace("%other%", pr.getOther().getId())
-                            .replace("%distance%", "0")
-                            .replace("%required%", "0")
-                            .replace("%owner%", ownerName));
+            String text = msg.msg("region_too_close")
+                    .replace("%other%", pr.getOther().getId())
+                    .replace("%distance%", "0")
+                    .replace("%required%", "0")
+                    .replace("%owner%", ownerName);
+
+            sendAction(player, text);
             return;
         }
 
@@ -243,8 +253,9 @@ public class ShovelToolListener implements Listener {
         manager.addRegion(nr);
         wg.save(world);
 
-        msg.send(player, "moved_corner",
-                s -> s.replace("%area%", String.valueOf(newArea)));
+        String text = msg.msg("moved_corner")
+                .replace("%area%", String.valueOf(newArea));
+        sendAction(player, text);
 
         visualizer.show(player, nr, null);
     }
@@ -273,6 +284,41 @@ public class ShovelToolListener implements Listener {
             case MIN_Z -> "Z1";
             case MAX_Z -> "Z2";
         };
+    }
+
+    private final Map<UUID, Integer> actionTasks = new HashMap<>();
+
+    private void sendAction(Player player, String text) {
+        if (text == null || text.isEmpty()) return;
+
+        int duration = TwilightClaims.getInstance().getConfig()
+                .getInt("actionbar.duration-ticks", 40);
+
+        if (actionTasks.containsKey(player.getUniqueId())) {
+            Bukkit.getScheduler().cancelTask(actionTasks.remove(player.getUniqueId()));
+        }
+
+        player.spigot().sendMessage(ChatMessageType.ACTION_BAR, new TextComponent(text));
+
+        int task = Bukkit.getScheduler().scheduleSyncRepeatingTask(
+                TwilightClaims.getInstance(),
+                () -> player.spigot().sendMessage(
+                        ChatMessageType.ACTION_BAR,
+                        new TextComponent(text)
+                ),
+                1L, 10L
+        );
+
+        actionTasks.put(player.getUniqueId(), task);
+
+        Bukkit.getScheduler().runTaskLater(
+                TwilightClaims.getInstance(),
+                () -> {
+                    Bukkit.getScheduler().cancelTask(task);
+                    actionTasks.remove(player.getUniqueId());
+                },
+                duration
+        );
     }
 
     private record CornerSelection(String regionId, CornerType type) {}
