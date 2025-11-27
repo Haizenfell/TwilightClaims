@@ -71,6 +71,7 @@ public class RegionVisualizer {
             player.sendBlockChange(locations.get(i), materials.get(i).createBlockData());
         }
     }
+
     public void showErrorTemporary(Player player, ProtectedRegion region, int seconds) {
         UUID id = player.getUniqueId();
 
@@ -90,6 +91,7 @@ public class RegionVisualizer {
             }
         }, seconds * 20L);
     }
+
     public void showErrorNearby(Player player, ProtectedRegion region) {
         int sec = plugin.getConfig().getInt("visual.stick-error-highlight-seconds", 3);
         showErrorTemporary(player, region, sec);
