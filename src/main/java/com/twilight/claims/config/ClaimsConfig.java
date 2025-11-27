@@ -58,15 +58,6 @@ public class ClaimsConfig {
     private String color(String s) {
         return ChatColor.translateAlternateColorCodes('&', s);
     }
-
-    public ItemStack getShovelItem() {
-        return shovelItem.clone();
-    }
-
-    public ItemStack getStickItem() {
-        return stickItem.clone();
-    }
-
     public boolean isShovel(ItemStack item) {
         if (item == null) return false;
         if (!item.hasItemMeta()) return false;
@@ -83,10 +74,6 @@ public class ClaimsConfig {
 
     public int getMinRadius() {
         return minRadius;
-    }
-
-    public int getBasePoints() {
-        return basePoints;
     }
 
     public int getPerHourPoints() {

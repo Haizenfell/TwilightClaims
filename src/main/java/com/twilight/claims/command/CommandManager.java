@@ -60,7 +60,7 @@ public class CommandManager implements CommandExecutor, TabCompleter {
     private boolean handleClaim(Player player, String[] args) {
         if (args.length == 0) {
             if (!player.hasPermission("twilight.claim.command.claim")) {
-                player.sendMessage("§c[!] You don't have permission");
+                player.sendMessage("§c[⚐] You don't have permission");
                 return true;
             }
 
@@ -70,13 +70,13 @@ public class CommandManager implements CommandExecutor, TabCompleter {
 
         String sub = args[0].toLowerCase();
         if (!claimSubCommands.containsKey(sub)) {
-            player.sendMessage("§c[!] Unknown subcommand");
+            player.sendMessage("§c[⚐] Unknown subcommand");
             return true;
         }
 
         String perm = claimSubCommands.get(sub);
         if (!player.hasPermission(perm)) {
-            player.sendMessage("§c[!] You don't have permission");
+            player.sendMessage("§c[⚐] You don't have permission");
             return true;
         }
 
@@ -87,7 +87,7 @@ public class CommandManager implements CommandExecutor, TabCompleter {
     private boolean handleTrust(Player player, String cmdName, String[] args) {
         String perm = mainCommands.get(cmdName);
         if (!player.hasPermission(perm)) {
-            player.sendMessage("§c[!] You don't have permission");
+            player.sendMessage("§c[⚐] You don't have permission");
             return true;
         }
 

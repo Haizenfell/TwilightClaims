@@ -7,9 +7,7 @@ import com.twilight.claims.tool.ShovelToolListener.CornerType;
 import com.twilight.claims.wg.WGHook;
 import org.bukkit.Bukkit;
 import org.bukkit.entity.Player;
-import org.bukkit.event.EventHandler;
 import org.bukkit.event.Listener;
-import org.bukkit.event.player.PlayerItemHeldEvent;
 
 import java.util.HashMap;
 import java.util.List;
@@ -37,27 +35,10 @@ public class AutoRegionViewListener implements Listener {
         );
     }
 
-    public void setSelectedCorner(Player player, CornerType type) {
-        if (type == null) {
-            selectedCorner.remove(player.getUniqueId());
-        } else {
-            selectedCorner.put(player.getUniqueId(), type);
-        }
-    }
-
     private void tick() {
         for (Player player : Bukkit.getOnlinePlayers()) {
             update(player);
         }
-    }
-
-    @EventHandler
-    public void onSwitch(PlayerItemHeldEvent event) {
-        Bukkit.getScheduler().runTaskLater(
-                TwilightWGClaims.getInstance(),
-                () -> update(event.getPlayer()),
-                1
-        );
     }
 
     private void update(Player player) {
