@@ -29,9 +29,31 @@ tools:
 
   stick:
     material: STICK
-    name: "&9Claim Stick"
+    name: "&9Claim Inspector"
     lore:
-      - "&9Right-Click &7on a block to see if anyone has claimed it"
+      - "&7"
+      - "&9Left-Click &7on a block to see if anyone has claimed it"
+      - "&7"
+      - "&9Right-click&7 to locate the nearest region within 100 blocks"
+      - "&7"
+
+stick-tool:
+  enabled: true
+  scan-radius: 100
+
+  messages:
+    unclaimed: "&9This block is not claimed."
+    inspect:
+      header: "&6Region Info:"
+      entry: "&7ID: &f%id% &7Owner: &f%owner% &7Area: &f%area%"
+    no-nearby: "&9No claimed regions nearby."
+    nearest-format: "&eNearest region: &f%owner% &7(%distance%m) %arrow%"
+
+  arrows:
+    front: "&f↑"
+    back: "&f↓"
+    left: "&f←"
+    right: "&f→"
 
 visual:
   edge-step-small: 3

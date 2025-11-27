@@ -93,4 +93,37 @@ public class ClaimsConfig {
     public int getPerHourPoints() {
         return perHourPoints;
     }
+
+    public String stickMsgUnclaimed() {
+        return plugin.getConfig().getString("stick-tool.messages.unclaimed", "&cThis block is not claimed.");
+    }
+
+    public String stickMsgNearest() {
+        return plugin.getConfig().getString("stick-tool.messages.nearest-format", "&eNearest region: &f%owner% &7(%distance%m) %arrow%");
+    }
+
+    public String stickMsgNoNearby() {
+        return plugin.getConfig().getString("stick-tool.messages.no-nearby", "&cNo claimed regions nearby.");
+    }
+
+    public int stickScanRadius() {
+        return plugin.getConfig().getInt("stick-tool.scan-radius", 100);
+    }
+
+    public String getStickArrowFront() {
+        return plugin.getConfig().getString("stick-tool.arrows.front", "↑");
+    }
+
+    public String getStickArrowBack() {
+        return plugin.getConfig().getString("stick-tool.arrows.back", "↓");
+    }
+
+    public String getStickArrowLeft() {
+        return plugin.getConfig().getString("stick-tool.arrows.left", "←");
+    }
+
+    public String getStickArrowRight() {
+        return plugin.getConfig().getString("stick-tool.arrows.right", "→");
+    }
+
 }

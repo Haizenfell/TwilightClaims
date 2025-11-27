@@ -26,25 +26,20 @@ public class WGHook {
         this.container = WorldGuard.getInstance().getPlatform().getRegionContainer();
     }
 
-    // MANAGER
     public RegionManager getManager(World world) {
         return container.get(BukkitAdapter.adapt(world));
     }
 
-    // Get any region at location
     public ProtectedRegion getRegionAt(Location loc) {
         RegionManager rm = getManager(loc.getWorld());
         if (rm == null) return null;
 
         ApplicableRegionSet set = rm.getApplicableRegions(BukkitAdapter.asBlockVector(loc));
         for (ProtectedRegion region : set) return region;
-
         return null;
     }
 
-    // Get nearest-important region for player
     public ProtectedRegion getRegionAt(Player p, Location loc) {
-
         RegionManager rm = getManager(loc.getWorld());
         if (rm == null) return null;
 
@@ -64,16 +59,14 @@ public class WGHook {
         }
 
         if (!owned.isEmpty()) {
-
             for (ProtectedRegion r : owned) {
                 BlockVector3 min = r.getMinimumPoint();
                 BlockVector3 max = r.getMaximumPoint();
                 if ((cx == min.x() && cz == min.z()) ||
                         (cx == min.x() && cz == max.z()) ||
                         (cx == max.x() && cz == min.z()) ||
-                        (cx == max.x() && cz == max.z())) {
+                        (cx == max.x() && cz == max.z()))
                     return r;
-                }
             }
 
             for (ProtectedRegion r : owned) {
@@ -82,23 +75,19 @@ public class WGHook {
                 if ((cz == min.z() && cx > min.x() && cx < max.x()) ||
                         (cz == max.z() && cx > min.x() && cx < max.x()) ||
                         (cx == min.x() && cz > min.z() && cz < max.z()) ||
-                        (cx == max.x() && cz > min.z() && cz < max.z())) {
+                        (cx == max.x() && cz > min.z() && cz < max.z()))
                     return r;
-                }
             }
 
             ProtectedRegion best = owned.get(0);
             for (ProtectedRegion r : owned)
-                if (getArea(r) < getArea(best))
-                    best = r;
-
+                if (getArea(r) < getArea(best)) best = r;
             return best;
         }
 
         ProtectedRegion best = all.get(0);
         for (ProtectedRegion r : all)
-            if (getArea(r) < getArea(best))
-                best = r;
+            if (getArea(r) < getArea(best)) best = r;
 
         return best;
     }
@@ -110,16 +99,48 @@ public class WGHook {
         List<ProtectedRegion> out = new ArrayList<>();
         UUID uid = p.getUniqueId();
 
-        for (ProtectedRegion r : rm.getRegions().values()) {
-            if (r.getOwners().contains(uid))
-                out.add(r);
-        }
+        for (ProtectedRegion r : rm.getRegions().values())
+            if (r.getOwners().contains(uid)) out.add(r);
+
         return out;
     }
 
-    // ============================================================
-    // PROXIMITY CHECK
-    // ============================================================
+    public Collection<ProtectedRegion> getAllRegions(World world) {
+        RegionManager manager = getManager(world);
+        if (manager == null) return List.of();
+        return manager.getRegions().values();
+    }
+
+    public Location getRegionCenter(ProtectedRegion region, World world) {
+        BlockVector3 min = region.getMinimumPoint();
+        BlockVector3 max = region.getMaximumPoint();
+
+        double x = (min.x() + max.x()) / 2.0;
+        double z = (min.z() + max.z()) / 2.0;
+
+        int y = world.getHighestBlockYAt((int) x, (int) z);
+        return new Location(world, x + 0.5, y + 1, z + 0.5);
+    }
+
+    public boolean isWithinRadius(ProtectedRegion region, Location origin, double radius) {
+        Location center = getRegionCenter(region, origin.getWorld());
+        return center.distance(origin) <= radius;
+    }
+
+    public double distanceToRegion(ProtectedRegion region, Location origin) {
+        Location center = getRegionCenter(region, origin.getWorld());
+        return center.distance(origin);
+    }
+
+    public ProtectedRegion getClosestRegion(Location origin, double radius) {
+        World world = origin.getWorld();
+        if (world == null) return null;
+
+        return getAllRegions(world).stream()
+                .filter(r -> isWithinRadius(r, origin, radius))
+                .min(Comparator.comparingDouble(r -> distanceToRegion(r, origin)))
+                .orElse(null);
+    }
 
     public static class ProximityResult {
         private final ProtectedRegion other;
@@ -128,24 +149,17 @@ public class WGHook {
             this.other = other;
         }
 
-        public ProtectedRegion getOther() {
-            return other;
-        }
-
+        public ProtectedRegion getOther() { return other; }
         public int getGap() { return 0; }
         public int getRequired() { return 0; }
     }
 
-    /**
-     * Зазор = 0. Разрешено касание, запрещено пересечение.
-     */
     public ProximityResult checkProximity(
             World world,
             BlockVector3 newMin,
             BlockVector3 newMax,
             ProtectedRegion ignore
     ) {
-
         RegionManager rm = getManager(world);
         if (rm == null) return null;
 
@@ -155,12 +169,8 @@ public class WGHook {
         int maxZ = Math.max(newMin.z(), newMax.z());
 
         for (ProtectedRegion other : rm.getRegions().values()) {
-
-            if (other.getId().equalsIgnoreCase("__global__"))
-                continue;
-
-            if (ignore != null && other.getId().equals(ignore.getId()))
-                continue;
+            if (other.getId().equalsIgnoreCase("__global__")) continue;
+            if (ignore != null && other.getId().equals(ignore.getId())) continue;
 
             BlockVector3 oMin = other.getMinimumPoint();
             BlockVector3 oMax = other.getMaximumPoint();
@@ -173,20 +183,13 @@ public class WGHook {
             boolean overlapX = minX <= oMaxX && maxX >= oMinX;
             boolean overlapZ = minZ <= oMaxZ && maxZ >= oMinZ;
 
-            if (overlapX && overlapZ) {
+            if (overlapX && overlapZ)
                 return new ProximityResult(other);
-            }
         }
-
         return null;
     }
 
-    // ============================================================
-    // CREATE REGION
-    // ============================================================
-
     public ProtectedRegion createRegion(Player p, int radius) {
-
         Location loc = p.getLocation();
         World w = p.getWorld();
 
@@ -212,7 +215,6 @@ public class WGHook {
 
         ProximityResult pr = checkProximity(w, newMin, newMax, null);
         if (pr != null) {
-
             plugin.getVisualizer().showError(p, pr.getOther());
 
             String owner = pr.getOther().getOwners().getUniqueIds()
@@ -226,13 +228,13 @@ public class WGHook {
                             .replace("%region%", pr.getOther().getId())
                             .replace("%owner%", owner)
             );
-
             return null;
         }
 
         String base = "claim_" + p.getUniqueId().toString().substring(0, 8);
         String id = base;
         int counter = 1;
+
         while (rm.hasRegion(id))
             id = base + "_" + counter++;
 
@@ -244,8 +246,6 @@ public class WGHook {
 
         return region;
     }
-
-    // UTILS
 
     public int getArea(ProtectedRegion r) {
         BlockVector3 min = r.getMinimumPoint();
