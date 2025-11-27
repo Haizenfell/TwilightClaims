@@ -1,0 +1,108 @@
+claim:
+  # Minimum radius for a region when using /claim
+  min-radius: 5
+
+  # Multiplier: X ClaimPoints gained per 1 hour of playtime
+  per-hour-points: 50
+
+tools:
+  shovel:
+    material: GOLDEN_SHOVEL
+    name: "&9Claim Shovel"
+    lore:
+      - "&7"
+      - "&7Type §9/claim §7To create a new claim"
+      - "&7"
+      - "&9Right-Click §7a corner or side if you want to resize your claim"
+      - "&7"
+      - "&7Type §9/trust <player>§7 to add a player to"
+      - "&7the list of trusted persons for this claim"
+      - "&7"
+      - "&7and §9/untrust <player>§7 to remove"
+      - "&7a player from the trusted list"
+      - "&7"
+      - "&7The §9Sea Lantern §7and §9Prismarine§7 blocks mark"
+      - "&7the corners and sides of your claim"
+
+  stick:
+    material: STICK
+    name: "&9Claim Stick"
+    lore:
+      - "&9Right-Click &7on a block to see if anyone has claimed it"
+
+visual:
+  edge-step-small: 3
+  edge-step-big: 5
+  edge-big-threshold: 10   # when a region is considered large
+  visual-duration-ticks: 200
+  error-duration: 10
+  corner-block: "SEA_LANTERN"
+  extend-block: "PRISMARINE"
+
+  corner-block_error: "SHROOMLIGHT"
+  extend-block_error: "CRIMSON_NYLIUM"
+  pos1-block: "DIAMOND_BLOCK"
+
+messages:
+  claim_points_header: "&9[⚐] &7Your Claim Points:"
+  claim_points_free: "&7Free points: &e%free_points%"
+  claim_points_used: "&7Used points: &e%points_used%"
+  claim_points_total: "&7Total claim points: &e%points_total%"
+  claim_points_purchased: "&7Purchased points: &e%purchased%"
+  claim_points_hours: "&7Points from playtime: &e%hours_points%"
+  claim_points_entry: "&7Claim &e%index%&7: (&a%id%&7): &e%area% &7points"
+
+  trust_list_empty_region: "&7Claim has no trusted players"
+  trust_list_header_region: "&9[⚐] &7Trusted players for claim &a%region%&7:"
+  trust_already: "&9[⚐] &7Player &e%player% &7is already trusted!"
+  trust_not_in_list: "&c[⚐] &7Player &e%player% &7is not trusted"
+  trust_target_not_online: "&c[⚐] &7Player &e%player% &7must be online"
+  trust_list_other_header: "&9[⚐] &7Trusted players of &e%player%&7:"
+  trust_list_other_empty: "&7Player &e%player% &7has no trusted players"
+
+  no_permission: "&c[⚐]You don't have permission for this action"
+  claimtool_usage: "&9[⚐]Usage: &6/%label% <shovel|stick>"
+  claimtool_give_shovel: "&9[⚐] You received the &9Claim shovel"
+  claimtool_give_stick: "&9[⚐] You received the &9Claim stick"
+  only_players: "&c[⚐] This command is for players only"
+
+  trust_usage: "&9[⚐]&7 Usage: &9/%label% &e<player>"
+  trust_not_found: "&c[⚐] Player &e%player% &cnot found!"
+  trust_list_entry: "&7- &e%player%"
+
+  region_create_conflict: "&c[⚐] Cannot create a claim — it overlaps with %owner%&c's claim!"
+  region_owner_unknown: "&c[⚐] Unknown player"
+  region_manager_null: "&c[⚐] Error: RegionManager not found for world &e%world%&c!"
+  region_too_small: "&c[⚐] The minimum claim size is 10x10 blocks!"
+  region_too_close: "&c[⚐] Cannot modify claim! Too close to %owner%&c's claim!"
+  no_region: "&c[⚐] There is no claim here"
+  not_owner: "&c[⚐] You are not the owner of this claim"
+  click_inside_region: "&9[⚐] &7Type &9/claim unclaim &7to delete this claim"
+
+  region_create: "&9[⚐] &7Claim &e%id% &acreated with size &e%area% &ablocks"
+  region_delete: "&9[⚐] &7Claim deleted. Freed &e%area% &7claim points"
+
+  region_info:
+    - "&9[⚐] &7Owner: &e%owner%"
+    - "&9[⚐] &7Area: &a%area%"
+    - "&9[⚐] &7Claim points: &e%used%&6/&e%total% &7(free: %free%)"
+
+  trust_add: "&9[⚐] &7Player &e%player% &awas added to trusted"
+  trust_remove: "&9[⚐] &7Player &e%player% &awas removed from trusted"
+  trust_list_header: "&9[⚐] &7Trusted players:"
+  trust_list_empty: "&7- Nobody."
+
+  claim_list_header: "&9[⚐] &7Your claims:"
+  claim_list_empty: "&7You have no claims"
+  claim_list_entry: "&7- &a%id% &7(&e%area% &7blocks)"
+
+  not_enough_points: "&c[⚐] Not enough claim points. Required: &e%need%, &cavailable: &e%free%"
+  select_corner: "&9[⚐] &7Corner selected: &9%corner%. &aRight-click &7another block"
+  select_side: "&9[⚐] &7Side selected: &9%side%. &aRight-click &7another block"
+  moved_corner: "&9[⚐] &7Corner moved. New area: &e%area%"
+
+  inspect_unclaimed: "&9[⚐] &7This block is unclaimed"
+  inspect_claim:
+    - "&9[⚐] &7Region: &a%id%"
+    - "&9[⚐] &7Owner: &e%owner%"
+    - "&9[⚐] &7Area: &e%area%"
