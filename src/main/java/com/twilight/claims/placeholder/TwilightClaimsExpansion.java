@@ -23,7 +23,6 @@ public class TwilightClaimsExpansion extends PlaceholderExpansion {
 
     @Override
     public String getIdentifier() {
-        // %tc_*%
         return "tc";
     }
 
@@ -49,49 +48,63 @@ public class TwilightClaimsExpansion extends PlaceholderExpansion {
 
     @Override
     public String onPlaceholderRequest(Player p, String params) {
-        if (p == null) {
-            return "";
-        }
+
+        if (p == null) return "";
 
         params = params.toLowerCase();
 
-        int used = claim.getUsed(p);
-        int total = claim.getTotal(p);
-        int free = total - used;
+        int used   = claim.getUsed(p);
+        int total  = claim.getTotal(p);
+        int free   = total - used;
 
-        int purchased = 0;
-        try {
-            String raw = PlaceholderAPI.setPlaceholders(p, "%yov_player_key:claim_points%");
-            purchased = Integer.parseInt(raw);
-        } catch (Exception ignored) {
-        }
+        int purchased = getPurchased(p);
+        int hours     = getHoursPlayed(p);
 
-        int hours = 0;
-        try {
-            String raw = PlaceholderAPI.setPlaceholders(p, "%statistic_hours_played%");
-            hours = Integer.parseInt(raw);
-        } catch (Exception ignored) {
-        }
+        int perHour   = claim.getPointsPerHourFromGroup(p);
 
-        int hoursPoints = hours * cfg.getPerHourPoints();
+        int hoursPoints = hours * perHour;
 
         switch (params) {
-            case "points_total":       // %tc_points_total%
+
+            case "points_total":
                 return String.valueOf(total);
-            case "points_used":        // %tc_points_used%
+
+            case "points_used":
                 return String.valueOf(used);
-            case "points_free":        // %tc_points_free%
+
+            case "points_free":
                 return String.valueOf(free);
-            case "points_purchased":   // %tc_points_purchased%
+
+            case "points_purchased":
                 return String.valueOf(purchased);
-            case "points_hours":       // %tc_points_hours%
-                return String.valueOf(hoursPoints);
-            case "points_hours_played":// %tc_points_hours_played%
+
+            case "points_hours_played":
                 return String.valueOf(hours);
-            case "points_per_hour":    // %tc_points_per_hour%
-                return String.valueOf(cfg.getPerHourPoints());
+
+            case "points_hours":
+                return String.valueOf(hoursPoints);
+
+            case "points_per_hour":
+                return String.valueOf(perHour);
+
             default:
-                return null; // null placeholder
+                return null;
         }
+    }
+
+    private int getPurchased(Player p) {
+        try {
+            String raw = PlaceholderAPI.setPlaceholders(p, "%yov_player_key:claim_points%");
+            return Integer.parseInt(raw);
+        } catch (Exception ignored) {}
+        return 0;
+    }
+
+    private int getHoursPlayed(Player p) {
+        try {
+            String raw = PlaceholderAPI.setPlaceholders(p, "%statistic_hours_played%");
+            return Integer.parseInt(raw);
+        } catch (Exception ignored) {}
+        return 0;
     }
 }

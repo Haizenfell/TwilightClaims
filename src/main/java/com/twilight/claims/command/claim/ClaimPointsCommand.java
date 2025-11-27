@@ -41,7 +41,9 @@ public class ClaimPointsCommand {
                     PlaceholderAPI.setPlaceholders(player, "%statistic_hours_played%"));
         } catch (Exception ignored) {}
 
-        int hoursPoints = hours * cfg.getPerHourPoints();
+        int perHour = claim.getPointsPerHourFromGroup(player);
+        int hoursPoints = hours * perHour;
+
 
         List<ProtectedRegion> regions = wg.getRegionsOwnedBy(player);
 
@@ -52,11 +54,11 @@ public class ClaimPointsCommand {
                 s -> s.replace("%points_used%", String.valueOf(used)));
         msg.send(player, "claim_points_total",
                 s -> s.replace("%points_total%", String.valueOf(total)));
-
+        msg.send(player, "claim_points_per_hour",
+                s -> s.replace("%per_hour%", String.valueOf(perHour)));
         final int purchasedFinal = purchased;
         msg.send(player, "claim_points_purchased",
                 s -> s.replace("%purchased%", String.valueOf(purchasedFinal)));
-
         msg.send(player, "claim_points_hours",
                 s -> s.replace("%hours_points%", String.valueOf(hoursPoints)));
 

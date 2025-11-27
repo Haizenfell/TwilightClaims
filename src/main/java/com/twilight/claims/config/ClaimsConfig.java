@@ -7,7 +7,9 @@ import org.bukkit.inventory.ItemStack;
 import org.bukkit.inventory.meta.ItemMeta;
 import com.twilight.claims.TwilightClaims;
 
+import java.util.HashMap;
 import java.util.List;
+import java.util.Map;
 import java.util.stream.Collectors;
 
 public class ClaimsConfig {
@@ -35,6 +37,18 @@ public class ClaimsConfig {
 
         this.shovelItem = createTool("tools.shovel");
         this.stickItem = createTool("tools.stick");
+    }
+
+    public Map<String, Integer> getGroupPointsMap() {
+        Map<String, Integer> map = new HashMap<>();
+
+        if (cfg.isConfigurationSection("points.groups")) {
+            for (String key : cfg.getConfigurationSection("points.groups").getKeys(false)) {
+                int val = cfg.getInt("points.groups." + key);
+                map.put(key, val);
+            }
+        }
+        return map;
     }
 
     private ItemStack createTool(String path) {

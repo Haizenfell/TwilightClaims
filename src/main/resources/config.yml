@@ -1,9 +1,12 @@
 claim:
-  # Minimum radius for a region when using /claim
   min-radius: 5
 
-  # Multiplier: X ClaimPoints gained per 1 hour of playtime
-  per-hour-points: 50
+points:
+  per-hour-default: 50
+  groups:
+    twilight.claim.points.nova: 60
+    twilight.claim.points.astralis: 70
+    twilight.claim.points.dev: 100
 
 tools:
   shovel:
@@ -33,7 +36,7 @@ tools:
 visual:
   edge-step-small: 3
   edge-step-big: 5
-  edge-big-threshold: 10   # when a region is considered large
+  edge-big-threshold: 10
   visual-duration-ticks: 200
   error-duration: 10
   corner-block: "SEA_LANTERN"
@@ -45,12 +48,13 @@ visual:
 
 messages:
   claim_points_header: "&9[⚐] &7Your Claim Points:"
-  claim_points_free: "&7- Free points: &e%free_points%"
-  claim_points_used: "&7- Used points: &e%points_used%"
-  claim_points_total: "&7- Total claim points: &e%points_total%"
-  claim_points_purchased: "&7- Purchased points: &e%purchased%"
-  claim_points_hours: "&7- Points from playtime: &e%hours_points%"
-  claim_points_entry: "&7- Claim &e%index%&7: (&a%id%&7): &e%area% &7points"
+  claim_points_free: "&7Free points: &e%free_points%"
+  claim_points_used: "&7Used points: &e%points_used%"
+  claim_points_total: "&7Total claim points: &e%points_total%"
+  claim_points_per_hour: "&7Points per hour: &e%per_hour%"
+  claim_points_purchased: "&7Purchased points: &e%purchased%"
+  claim_points_hours: "&7Points from playtime: &e%hours_points%"
+  claim_points_entry: "&7Claim &e%index%&7: (&a%id%&7): &e%area% &7points"
 
   trust_list_empty_region: "&7Claim has no trusted players"
   trust_list_header_region: "&9[⚐] &7Trusted players for claim &a%region%&7:"
@@ -83,9 +87,9 @@ messages:
   region_delete: "&9[⚐] &7Claim deleted. Freed &e%area% &7claim points"
 
   region_info:
-    - "&9[⚐] &7Claim: &a%id%"
     - "&9[⚐] &7Owner: &e%owner%"
-    - "&9[⚐] &7Area: &e%area%"
+    - "&9[⚐] &7Area: &a%area%"
+    - "&9[⚐] &7Claim points: &e%used%&6/&e%total% &7(free: %free%)"
 
   trust_add: "&9[⚐] &7Player &e%player% &awas added to trusted"
   trust_remove: "&9[⚐] &7Player &e%player% &awas removed from trusted"
@@ -103,6 +107,6 @@ messages:
 
   inspect_unclaimed: "&9[⚐] &7This block is unclaimed"
   inspect_claim:
-    - "&9[⚐] &7Claim: &a%id%"
+    - "&9[⚐] &7Region: &a%id%"
     - "&9[⚐] &7Owner: &e%owner%"
     - "&9[⚐] &7Area: &e%area%"

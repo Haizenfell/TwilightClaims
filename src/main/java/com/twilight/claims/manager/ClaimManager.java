@@ -6,6 +6,8 @@ import com.twilight.claims.wg.WGHook;
 import me.clip.placeholderapi.PlaceholderAPI;
 import org.bukkit.entity.Player;
 
+import java.util.Map;
+
 public class ClaimManager {
 
     private final TwilightClaims plugin;
@@ -25,19 +27,12 @@ public class ClaimManager {
     }
 
     public int getTotal(Player player) {
-        int base = 0;
-        try {
-            String val = PlaceholderAPI.setPlaceholders(player, "%yov_player_key:claim_points%");
-            base = Integer.parseInt(val);
-        } catch (Exception ignored) {}
+        int purchased = getPurchasedPoints(player);
+        int hoursPlayed = getHoursPlayed(player);
 
-        int hours = 0;
-        try {
-            String h = PlaceholderAPI.setPlaceholders(player, "%statistic_hours_played%");
-            hours = Integer.parseInt(h);
-        } catch (Exception ignored) {}
+        int pointsPerHour = getPointsPerHourFromGroup(player);
 
-        return base + hours * cfg.getPerHourPoints();
+        return purchased + hoursPlayed * pointsPerHour;
     }
 
     public int getFree(Player player) {
@@ -47,5 +42,42 @@ public class ClaimManager {
     public boolean canExpand(Player player, int deltaArea) {
         if (deltaArea <= 0) return true;
         return getFree(player) >= deltaArea;
+    }
+
+    private int getPurchasedPoints(Player player) {
+        try {
+            return Integer.parseInt(
+                    PlaceholderAPI.setPlaceholders(player, "%yov_player_key:claim_points%")
+            );
+        } catch (Exception ignored) {}
+        return 0;
+    }
+
+    private int getHoursPlayed(Player player) {
+        try {
+            return Integer.parseInt(
+                    PlaceholderAPI.setPlaceholders(player, "%statistic_hours_played%")
+            );
+        } catch (Exception ignored) {}
+        return 0;
+    }
+
+    public int getPointsPerHourFromGroup(Player player) {
+        Map<String, Integer> groups = cfg.getGroupPointsMap();
+        int max = 0;
+        for (Map.Entry<String, Integer> entry : groups.entrySet()) {
+            String permission = entry.getKey();
+            int value = entry.getValue();
+
+            if (player.hasPermission(permission)) {
+                if (value > max) {
+                    max = value;
+                }
+            }
+        }
+        if (max == 0) {
+            return cfg.getPerHourPoints();
+        }
+        return max;
     }
 }
