@@ -18,9 +18,9 @@ import org.bukkit.plugin.java.JavaPlugin;
 
 import java.util.Objects;
 
-public class TwilightWGClaims extends JavaPlugin {
+public class TwilightClaims extends JavaPlugin {
 
-    private static TwilightWGClaims instance;
+    private static TwilightClaims instance;
 
     private ClaimsConfig claimsConfig;
     private Messages messages;
@@ -28,7 +28,7 @@ public class TwilightWGClaims extends JavaPlugin {
     private ClaimManager claimManager;
     private RegionVisualizer visualizer;
 
-    public static TwilightWGClaims getInstance() {
+    public static TwilightClaims getInstance() {
         return instance;
     }
 

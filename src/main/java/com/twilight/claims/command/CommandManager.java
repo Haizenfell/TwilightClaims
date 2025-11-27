@@ -1,6 +1,6 @@
 package com.twilight.claims.command;
 
-import com.twilight.claims.TwilightWGClaims;
+import com.twilight.claims.TwilightClaims;
 import org.bukkit.command.*;
 import org.bukkit.entity.Player;
 
@@ -8,14 +8,14 @@ import java.util.*;
 
 public class CommandManager implements CommandExecutor, TabCompleter {
 
-    private final TwilightWGClaims plugin;
+    private final TwilightClaims plugin;
     private final ClaimCommand claimCmd;
     private final TrustCommand trustCmd;
 
     private final Map<String, String> claimSubCommands = new LinkedHashMap<>();
     private final Map<String, String> mainCommands = new LinkedHashMap<>();
 
-    public CommandManager(TwilightWGClaims plugin,
+    public CommandManager(TwilightClaims plugin,
                           ClaimCommand claimCmd,
                           TrustCommand trustCmd) {
 

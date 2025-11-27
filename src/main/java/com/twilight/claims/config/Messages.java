@@ -1,6 +1,6 @@
 package com.twilight.claims.config;
 
-import com.twilight.claims.TwilightWGClaims;
+import com.twilight.claims.TwilightClaims;
 import org.bukkit.ChatColor;
 import org.bukkit.configuration.file.FileConfiguration;
 import org.bukkit.entity.Player;
@@ -11,7 +11,7 @@ public class Messages {
 
     private final FileConfiguration cfg;
 
-    public Messages(TwilightWGClaims plugin) {
+    public Messages(TwilightClaims plugin) {
         this.cfg = plugin.getConfig();
     }
 

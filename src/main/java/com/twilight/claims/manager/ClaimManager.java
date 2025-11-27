@@ -1,6 +1,6 @@
 package com.twilight.claims.manager;
 
-import com.twilight.claims.TwilightWGClaims;
+import com.twilight.claims.TwilightClaims;
 import com.twilight.claims.config.ClaimsConfig;
 import com.twilight.claims.wg.WGHook;
 import me.clip.placeholderapi.PlaceholderAPI;
@@ -8,11 +8,11 @@ import org.bukkit.entity.Player;
 
 public class ClaimManager {
 
-    private final TwilightWGClaims plugin;
+    private final TwilightClaims plugin;
     private final WGHook wg;
     private final ClaimsConfig cfg;
 
-    public ClaimManager(TwilightWGClaims plugin, WGHook wg, ClaimsConfig cfg) {
+    public ClaimManager(TwilightClaims plugin, WGHook wg, ClaimsConfig cfg) {
         this.plugin = plugin;
         this.wg = wg;
         this.cfg = cfg;

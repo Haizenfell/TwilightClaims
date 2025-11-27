@@ -1,6 +1,6 @@
 package com.twilight.claims.placeholder;
 
-import com.twilight.claims.TwilightWGClaims;
+import com.twilight.claims.TwilightClaims;
 import com.twilight.claims.config.ClaimsConfig;
 import com.twilight.claims.manager.ClaimManager;
 import me.clip.placeholderapi.PlaceholderAPI;
@@ -9,11 +9,11 @@ import org.bukkit.entity.Player;
 
 public class TwilightClaimsExpansion extends PlaceholderExpansion {
 
-    private final TwilightWGClaims plugin;
+    private final TwilightClaims plugin;
     private final ClaimManager claim;
     private final ClaimsConfig cfg;
 
-    public TwilightClaimsExpansion(TwilightWGClaims plugin,
+    public TwilightClaimsExpansion(TwilightClaims plugin,
                                    ClaimManager claim,
                                    ClaimsConfig cfg) {
         this.plugin = plugin;

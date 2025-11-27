@@ -1,14 +1,12 @@
-name: TwilightWGClaims
-main: com.twilight.claims.TwilightWGClaims
-version: 1.0
+name: TwilightClaims
+main: com.twilight.claims.TwilightClaims
+version: 1.1
 api-version: 1.21
 author: Haizenfell
 description: WorldGuard-based claim system.
 
-depend:
-  - WorldGuard
-softdepend:
-  - PlaceholderAPI
+depend: [WorldGuard]
+softdepend: [PlaceholderAPI]
 
 commands:
   claim:

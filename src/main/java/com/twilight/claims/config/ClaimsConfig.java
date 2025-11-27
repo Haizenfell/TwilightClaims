@@ -5,14 +5,14 @@ import org.bukkit.Material;
 import org.bukkit.configuration.file.FileConfiguration;
 import org.bukkit.inventory.ItemStack;
 import org.bukkit.inventory.meta.ItemMeta;
-import com.twilight.claims.TwilightWGClaims;
+import com.twilight.claims.TwilightClaims;
 
 import java.util.List;
 import java.util.stream.Collectors;
 
 public class ClaimsConfig {
 
-    private final TwilightWGClaims plugin;
+    private final TwilightClaims plugin;
     private final FileConfiguration cfg;
 
     private ItemStack shovelItem;
@@ -22,7 +22,7 @@ public class ClaimsConfig {
     private int basePoints;
     private int perHourPoints;
 
-    public ClaimsConfig(TwilightWGClaims plugin) {
+    public ClaimsConfig(TwilightClaims plugin) {
         this.plugin = plugin;
         this.cfg = plugin.getConfig();
         load();

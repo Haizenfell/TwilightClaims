@@ -1,6 +1,6 @@
 package com.twilight.claims.command;
 
-import com.twilight.claims.TwilightWGClaims;
+import com.twilight.claims.TwilightClaims;
 import com.twilight.claims.command.claim.*;
 import com.twilight.claims.config.ClaimsConfig;
 import com.twilight.claims.config.Messages;
@@ -18,7 +18,7 @@ public class ClaimCommand {
     private final ClaimListCommand listCmd;
     private final ClaimUnclaimCommand unclaimCmd;
 
-    public ClaimCommand(TwilightWGClaims plugin,
+    public ClaimCommand(TwilightClaims plugin,
                         ClaimsConfig cfg,
                         Messages msg,
                         WGHook wg,

@@ -1,7 +1,7 @@
 package com.twilight.claims.visual;
 
 import com.sk89q.worldguard.protection.regions.ProtectedRegion;
-import com.twilight.claims.TwilightWGClaims;
+import com.twilight.claims.TwilightClaims;
 import com.twilight.claims.config.ClaimsConfig;
 import com.twilight.claims.tool.ShovelToolListener.CornerType;
 import com.twilight.claims.wg.WGHook;
@@ -28,7 +28,7 @@ public class AutoRegionViewListener implements Listener {
         this.visualizer = visualizer;
 
         Bukkit.getScheduler().runTaskTimer(
-                TwilightWGClaims.getInstance(),
+                TwilightClaims.getInstance(),
                 this::tick,
                 10,
                 10

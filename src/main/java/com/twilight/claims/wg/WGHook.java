@@ -1,7 +1,7 @@
 package com.twilight.claims.wg;
 
 import com.sk89q.worldguard.protection.regions.RegionContainer;
-import com.twilight.claims.TwilightWGClaims;
+import com.twilight.claims.TwilightClaims;
 import com.sk89q.worldedit.bukkit.BukkitAdapter;
 import com.sk89q.worldedit.math.BlockVector3;
 import com.sk89q.worldguard.WorldGuard;
@@ -18,10 +18,10 @@ import java.util.*;
 
 public class WGHook {
 
-    private final TwilightWGClaims plugin;
+    private final TwilightClaims plugin;
     private final RegionContainer container;
 
-    public WGHook(TwilightWGClaims plugin) {
+    public WGHook(TwilightClaims plugin) {
         this.plugin = plugin;
         this.container = WorldGuard.getInstance().getPlatform().getRegionContainer();
     }

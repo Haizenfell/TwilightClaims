@@ -2,7 +2,7 @@ package com.twilight.claims.visual;
 
 import com.sk89q.worldedit.math.BlockVector3;
 import com.sk89q.worldguard.protection.regions.ProtectedRegion;
-import com.twilight.claims.TwilightWGClaims;
+import com.twilight.claims.TwilightClaims;
 import com.twilight.claims.tool.ShovelToolListener.CornerType;
 import org.bukkit.*;
 import org.bukkit.entity.Player;
@@ -12,7 +12,7 @@ import java.util.*;
 
 public class RegionVisualizer {
 
-    private final TwilightWGClaims plugin;
+    private final TwilightClaims plugin;
 
     private final Material cornerMaterial;
     private final Material extendMaterial;
@@ -24,7 +24,7 @@ public class RegionVisualizer {
     private final Map<UUID, BukkitTask> clearTasks = new HashMap<>();
     private final Map<UUID, Long> errorUntil = new HashMap<>();
 
-    public RegionVisualizer(TwilightWGClaims plugin) {
+    public RegionVisualizer(TwilightClaims plugin) {
         this.plugin = plugin;
 
         cornerMaterial = Material.matchMaterial(
