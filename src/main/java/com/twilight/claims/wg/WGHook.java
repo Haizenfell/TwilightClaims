@@ -108,17 +108,23 @@ public class WGHook {
     }
 
     public List<ProtectedRegion> getRegionsOwnedBy(Player p) {
-        RegionManager rm = getManager(p.getWorld());
-        if (rm == null) return List.of();
-
         List<ProtectedRegion> out = new ArrayList<>();
         UUID uid = p.getUniqueId();
 
-        for (ProtectedRegion r : rm.getRegions().values())
-            if (r.getOwners().contains(uid)) out.add(r);
+        for (World world : Bukkit.getWorlds()) {
+            RegionManager rm = getManager(world);
+            if (rm == null) continue;
+
+            for (ProtectedRegion r : rm.getRegions().values()) {
+                if (r.getOwners().contains(uid)) {
+                    out.add(r);
+                }
+            }
+        }
 
         return out;
     }
+
 
     public Collection<ProtectedRegion> getAllRegions(World world) {
         RegionManager manager = getManager(world);
