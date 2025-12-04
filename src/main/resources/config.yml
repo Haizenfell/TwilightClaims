@@ -58,6 +58,8 @@ stick-tool:
     right: "&f→"
 
 visual:
+  max-distance: 64          # макс. дистанция визуала от игрока, <=0 = без лимита
+  only-loaded-chunks: true  # рисовать только в загруженных чанках
   edge-step-small: 3
   edge-step-big: 5
   edge-big-threshold: 10
