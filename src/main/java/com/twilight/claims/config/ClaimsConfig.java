@@ -2,6 +2,7 @@ package com.twilight.claims.config;
 
 import org.bukkit.ChatColor;
 import org.bukkit.Material;
+import org.bukkit.configuration.ConfigurationSection;
 import org.bukkit.configuration.file.FileConfiguration;
 import org.bukkit.inventory.ItemStack;
 import org.bukkit.inventory.meta.ItemMeta;
@@ -32,8 +33,7 @@ public class ClaimsConfig {
 
     private void load() {
         this.minRadius = cfg.getInt("claim.min-radius", 5);
-        this.basePoints = cfg.getInt("claim.base-claim-points", 2000);
-        this.perHourPoints = cfg.getInt("claim.per-hour-points", 100);
+        this.perHourPoints = cfg.getInt("points.per-hour-default", 50);
 
         this.shovelItem = createTool("tools.shovel");
         this.stickItem = createTool("tools.stick");
@@ -42,14 +42,19 @@ public class ClaimsConfig {
     public Map<String, Integer> getGroupPointsMap() {
         Map<String, Integer> map = new HashMap<>();
 
-        if (cfg.isConfigurationSection("points.groups")) {
-            for (String key : cfg.getConfigurationSection("points.groups").getKeys(false)) {
-                int val = cfg.getInt("points.groups." + key);
-                map.put(key, val);
-            }
+        if (!cfg.isConfigurationSection("points.groups")) {
+            return map;
         }
+        ConfigurationSection section = cfg.getConfigurationSection("points.groups");
+
+        for (String key : section.getKeys(false)) {
+            int val = section.getInt(key, 0);
+            map.put(key, val);
+        }
+
         return map;
     }
+
 
     private ItemStack createTool(String path) {
         String matName = cfg.getString(path + ".material", "STICK");

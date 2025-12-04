@@ -4,9 +4,18 @@ claim:
 points:
   per-hour-default: 50
   groups:
-    twilight.claim.points.nova: 60
-    twilight.claim.points.astralis: 70
-    twilight.claim.points.dev: 100
+    ember: 55
+    spark: 60
+    flare: 65
+    radiant: 70
+    aurora: 75
+    nova: 60
+    astralis: 70
+    quasar: 80
+    eclipse: 90
+    moonlight: 100
+    dev: 100
+# twilight.claim.points.ember
 
 tools:
   shovel:

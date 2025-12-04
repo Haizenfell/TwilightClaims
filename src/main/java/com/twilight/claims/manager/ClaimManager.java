@@ -65,14 +65,15 @@ public class ClaimManager {
     public int getPointsPerHourFromGroup(Player player) {
         Map<String, Integer> groups = cfg.getGroupPointsMap();
         int max = 0;
+        String basePerm = "twilight.claim.points.";
         for (Map.Entry<String, Integer> entry : groups.entrySet()) {
-            String permission = entry.getKey();
+            String key = entry.getKey();
             int value = entry.getValue();
 
-            if (player.hasPermission(permission)) {
-                if (value > max) {
-                    max = value;
-                }
+            String permission = basePerm + key;
+
+            if (player.hasPermission(permission) && value > max) {
+                max = value;
             }
         }
         if (max == 0) {
@@ -80,4 +81,5 @@ public class ClaimManager {
         }
         return max;
     }
+
 }
