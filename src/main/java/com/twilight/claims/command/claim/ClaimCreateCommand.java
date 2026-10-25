@@ -5,8 +5,11 @@ import com.twilight.claims.config.ClaimsConfig;
 import com.twilight.claims.config.Messages;
 import com.twilight.claims.manager.ClaimManager;
 import com.twilight.claims.visual.RegionVisualizer;
+import com.twilight.claims.wg.ClaimIdentity;
 import com.twilight.claims.wg.WGHook;
 import org.bukkit.entity.Player;
+
+import java.util.Objects;
 
 public class ClaimCreateCommand {
 
@@ -27,8 +30,13 @@ public class ClaimCreateCommand {
 
     public void execute(Player player) {
         int radius = cfg.getMinRadius();
-        int area = (radius * 2 + 1) * (radius * 2 + 1);
-        int free = claim.getFree(player);
+        if (radius < 0) {
+            msg.send(player, "region_invalid_size", text -> text);
+            return;
+        }
+        long diameter = 2L * radius + 1;
+        long area = diameter > Long.MAX_VALUE / diameter ? Long.MAX_VALUE : diameter * diameter;
+        long free = claim.getFree(player);
 
         if (free < area) {
             msg.send(player, "not_enough_points",
@@ -41,7 +49,8 @@ public class ClaimCreateCommand {
         if (region == null) return;
 
         msg.send(player, "region_create",
-                s -> s.replace("%id%", region.getId())
+                s -> s.replace("%id%", ClaimIdentity.displayName(region))
+                        .replace("%owner%", Objects.toString(player.getName(), "Unknown"))
                         .replace("%area%", String.valueOf(area)));
 
         visualizer.show(player, region, null);

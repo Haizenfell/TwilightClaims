@@ -2,21 +2,22 @@ package com.twilight.claims.command;
 
 import com.twilight.claims.command.trust.*;
 import com.twilight.claims.config.Messages;
-import com.twilight.claims.manager.ClaimManager;
 import com.twilight.claims.wg.WGHook;
 import org.bukkit.Bukkit;
-import org.bukkit.OfflinePlayer;
 import org.bukkit.entity.Player;
+import java.util.Locale;
 
 public class TrustCommand {
 
+    private final Messages msg;
     private final TrustRegionChecker regionChecker;
     private final TrustAddCommand add;
     private final TrustRemoveCommand remove;
     private final TrustListSelfCommand listSelf;
     private final TrustListOtherCommand listOther;
 
-    public TrustCommand(Messages msg, WGHook wg, ClaimManager claim) {
+    public TrustCommand(Messages msg, WGHook wg) {
+        this.msg = msg;
         this.regionChecker = new TrustRegionChecker(msg, wg);
         this.add = new TrustAddCommand(msg, wg);
         this.remove = new TrustRemoveCommand(msg, wg);
@@ -26,38 +27,39 @@ public class TrustCommand {
 
     public boolean handle(Player player, String command, String[] args) {
 
-        switch (command.toLowerCase()) {
+        switch (command.toLowerCase(Locale.ROOT)) {
 
             case "trust" -> {
-                if (args.length < 1) return usage(player, "trust");
+                if (args.length != 1) return usage(player, "trust");
                 var region = regionChecker.getRegionOwned(player);
                 if (region != null) add.execute(player, region, args[0]);
                 return true;
             }
 
             case "untrust" -> {
-                if (args.length < 1) return usage(player, "untrust");
+                if (args.length != 1) return usage(player, "untrust");
                 var region = regionChecker.getRegionOwned(player);
                 if (region != null) remove.execute(player, region, args[0]);
                 return true;
             }
 
             case "trustlist" -> {
+                if (args.length > 1) return usage(player, "trustlist");
                 if (args.length == 0) {
                     var region = regionChecker.getRegionOwned(player);
                     if (region != null) listSelf.execute(player, region);
                     return true;
                 }
 
-                OfflinePlayer target = Bukkit.getOfflinePlayer(args[0]);
-                Player online = target.getPlayer();
-
+                Player online = findOnlinePlayer(args[0]);
                 if (online == null) {
-                    var msg = regionChecker.getClass().getSimpleName();
+                    msg.send(player, "trust_target_not_online",
+                            x -> x.replace("%player%", args[0]));
+                    return true;
                 }
 
-                var region = regionChecker.getRegionOwned(online);
-                if (region != null) listOther.execute(player, target, region);
+                var region = regionChecker.getRegionOwned(player, online);
+                if (region != null) listOther.execute(player, online, region);
                 return true;
             }
 
@@ -68,8 +70,17 @@ public class TrustCommand {
         }
     }
 
+    private Player findOnlinePlayer(String name) {
+        for (Player online : Bukkit.getOnlinePlayers()) {
+            if (online.getName().equalsIgnoreCase(name)) {
+                return online;
+            }
+        }
+        return null;
+    }
+
     private boolean usage(Player player, String label) {
-        player.sendMessage("§c[⚐] /"+ label + " <player>");
+        msg.send(player, "trust_usage", text -> text.replace("%label%", label));
         return true;
     }
 }

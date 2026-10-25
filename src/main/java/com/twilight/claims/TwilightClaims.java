@@ -3,9 +3,12 @@ package com.twilight.claims;
 import com.twilight.claims.command.ClaimCommand;
 import com.twilight.claims.command.CommandManager;
 import com.twilight.claims.command.TrustCommand;
+import com.twilight.claims.command.claim.ClaimDeletionService;
 import com.twilight.claims.config.ClaimsConfig;
+import com.twilight.claims.config.ConfigMigration;
 import com.twilight.claims.config.Messages;
 import com.twilight.claims.manager.ClaimManager;
+import com.twilight.claims.placeholder.PlaceholderResolver;
 import com.twilight.claims.placeholder.TwilightClaimsExpansion;
 import com.twilight.claims.tool.ShovelToolListener;
 import com.twilight.claims.tool.StickToolListener;
@@ -15,6 +18,10 @@ import com.twilight.claims.wg.WGHook;
 import org.bukkit.Bukkit;
 import org.bukkit.plugin.Plugin;
 import org.bukkit.plugin.java.JavaPlugin;
+import org.bukkit.event.EventHandler;
+import org.bukkit.event.Listener;
+import org.bukkit.event.player.PlayerJoinEvent;
+import org.bukkit.event.player.PlayerQuitEvent;
 
 import java.util.Objects;
 
@@ -27,6 +34,8 @@ public class TwilightClaims extends JavaPlugin {
     private WGHook wgHook;
     private ClaimManager claimManager;
     private RegionVisualizer visualizer;
+    private TwilightClaimsExpansion expansion;
+    private ClaimDeletionService deletions;
 
     public static TwilightClaims getInstance() {
         return instance;
@@ -44,26 +53,33 @@ public class TwilightClaims extends JavaPlugin {
     public void onEnable() {
         instance = this;
         saveDefaultConfig();
+        if (ConfigMigration.migrate(getConfig())) saveConfig();
 
         claimsConfig = new ClaimsConfig(this);
         messages = new Messages(this);
 
         wgHook = new WGHook(this);
-        claimManager = new ClaimManager(this, wgHook, claimsConfig);
+        claimManager = new ClaimManager(wgHook, claimsConfig, new PlaceholderResolver(this));
         visualizer = new RegionVisualizer(this);
+        deletions = new ClaimDeletionService(wgHook, messages, visualizer);
+        Bukkit.getPluginManager().registerEvents(deletions, this);
 
         Plugin papi = Bukkit.getPluginManager().getPlugin("PlaceholderAPI");
         if (papi != null && papi.isEnabled()) {
-            new TwilightClaimsExpansion(this, claimManager, claimsConfig).register();
-            getLogger().info("Registered TwilightWGClaims PlaceholderAPI expansion.");
+            expansion = new TwilightClaimsExpansion(this, claimManager);
+            if (expansion.register()) {
+                getLogger().info("Registered TwilightClaims PlaceholderAPI expansion.");
+            } else {
+                getLogger().warning("Could not register %tc_*% placeholders: identifier already registered.");
+                expansion = null;
+            }
         } else {
-            getLogger().warning("PlaceholderAPI not found, %twgc_*% placeholders disabled.");
+            getLogger().warning("PlaceholderAPI not found, %tc_*% placeholders disabled.");
         }
 
         CommandManager router = new CommandManager(
-                this,
-                new ClaimCommand(this, claimsConfig, messages, wgHook, claimManager, visualizer),
-                new TrustCommand(messages, wgHook, claimManager)
+                new ClaimCommand(claimsConfig, messages, wgHook, claimManager, visualizer, deletions),
+                new TrustCommand(messages, wgHook), messages
         );
 
         register(router, "claim");
@@ -86,7 +102,21 @@ public class TwilightClaims extends JavaPlugin {
                 this
         );
 
-        getLogger().info("TwilightWGClaims enabled.");
+        Bukkit.getPluginManager().registerEvents(new Listener() {
+            @EventHandler
+            public void onJoin(PlayerJoinEvent event) {
+                claimManager.refresh(event.getPlayer());
+            }
+
+            @EventHandler
+            public void onQuit(PlayerQuitEvent event) {
+                claimManager.forget(event.getPlayer());
+            }
+        }, this);
+        Bukkit.getScheduler().runTaskTimer(this,
+                () -> Bukkit.getOnlinePlayers().forEach(claimManager::refresh), 1L, 20L);
+
+        getLogger().info("TwilightClaims enabled.");
     }
 
     private void register(CommandManager router, String command) {
@@ -96,6 +126,14 @@ public class TwilightClaims extends JavaPlugin {
 
     @Override
     public void onDisable() {
-        getLogger().info("TwilightWGClaims disabled.");
+        if (deletions != null) deletions.close();
+        if (visualizer != null) visualizer.close();
+        if (expansion != null) {
+            expansion.unregister();
+            expansion = null;
+        }
+        Bukkit.getScheduler().cancelTasks(this);
+        instance = null;
+        getLogger().info("TwilightClaims disabled.");
     }
 }

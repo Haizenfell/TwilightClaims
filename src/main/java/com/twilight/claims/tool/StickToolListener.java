@@ -3,16 +3,17 @@ package com.twilight.claims.tool;
 import com.twilight.claims.TwilightClaims;
 import com.twilight.claims.config.ClaimsConfig;
 import com.twilight.claims.config.Messages;
+import com.twilight.claims.wg.ClaimIdentity;
 import com.twilight.claims.wg.WGHook;
 import com.sk89q.worldguard.protection.regions.ProtectedRegion;
-import net.md_5.bungee.api.ChatMessageType;
-import net.md_5.bungee.api.chat.TextComponent;
+import net.kyori.adventure.text.serializer.legacy.LegacyComponentSerializer;
 import org.bukkit.Bukkit;
 import org.bukkit.Location;
 import org.bukkit.entity.Player;
 import org.bukkit.event.EventHandler;
 import org.bukkit.event.Listener;
 import org.bukkit.event.player.PlayerInteractEvent;
+import org.bukkit.inventory.EquipmentSlot;
 import org.bukkit.util.Vector;
 
 public class StickToolListener implements Listener {
@@ -29,6 +30,8 @@ public class StickToolListener implements Listener {
 
     @EventHandler
     public void onUse(PlayerInteractEvent event) {
+        if (event.getHand() != EquipmentSlot.HAND) return;
+        if (!cfg.isStickToolEnabled()) return;
         if (!event.hasBlock()) return;
         if (event.getItem() == null) return;
         if (!cfg.isStick(event.getItem())) return;
@@ -54,20 +57,22 @@ public class StickToolListener implements Listener {
 
         String owner = region.getOwners().getUniqueIds().stream()
                 .findFirst()
-                .map(id -> Bukkit.getOfflinePlayer(id).getName())
+                .map(id -> {
+                    String name = Bukkit.getOfflinePlayer(id).getName();
+                    return name == null ? id.toString() : name;
+                })
                 .orElse("Unknown");
 
-        int area = wg.getArea(region);
+        long area = wg.getArea(region);
 
         msg.sendList(player, "inspect_claim",
-                s -> s.replace("%id%", region.getId())
+                s -> s.replace("%id%", ClaimIdentity.displayName(region))
                         .replace("%owner%", owner)
                         .replace("%area%", String.valueOf(area)));
     }
 
     private void handleRightClick(Player player, Location origin) {
 
-        // Если игрок уже в регионе → показываем левую информацию
         ProtectedRegion current = wg.getRegionAt(origin);
         if (current != null) {
             handleLeftClick(player, origin);
@@ -82,16 +87,21 @@ public class StickToolListener implements Listener {
         }
 
         Location nearestPoint = wg.getNearestPointInRegion(nearest, origin);
-        double dist = nearestPoint.distance(origin);
+        double dist = wg.distanceToRegion(nearest, origin);
 
         String owner = nearest.getOwners().getUniqueIds().stream()
                 .findFirst()
-                .map(id -> Bukkit.getOfflinePlayer(id).getName())
+                .map(id -> {
+                    String name = Bukkit.getOfflinePlayer(id).getName();
+                    return name == null ? id.toString() : name;
+                })
                 .orElse("Unknown");
 
         String arrow = getDirectionArrow(player, nearestPoint);
 
         String text = cfg.stickMsgNearest()
+                .replace("%id%", ClaimIdentity.displayName(nearest))
+                .replace("%region%", ClaimIdentity.displayName(nearest))
                 .replace("%owner%", owner)
                 .replace("%distance%", String.valueOf((int) dist))
                 .replace("%arrow%", arrow);
@@ -108,8 +118,15 @@ public class StickToolListener implements Listener {
     private String getDirectionArrow(Player player, Location target) {
 
         Location loc = player.getLocation();
-        Vector look = loc.getDirection().setY(0).normalize();
-        Vector to = target.clone().subtract(loc).toVector().setY(0).normalize();
+        Vector look = loc.getDirection().setY(0);
+        Vector to = target.clone().subtract(loc).toVector().setY(0);
+
+        if (look.lengthSquared() == 0 || to.lengthSquared() == 0) {
+            return cfg.getStickArrowFront();
+        }
+
+        look.normalize();
+        to.normalize();
 
         double angle = look.angle(to);
         double cross = look.crossProduct(to).getY();
@@ -127,7 +144,7 @@ public class StickToolListener implements Listener {
     }
 
     private void sendAction(Player p, String msg) {
-        p.spigot().sendMessage(ChatMessageType.ACTION_BAR, new TextComponent(msg));
+        p.sendActionBar(LegacyComponentSerializer.legacySection().deserialize(msg));
     }
 
     private String color(String s) {

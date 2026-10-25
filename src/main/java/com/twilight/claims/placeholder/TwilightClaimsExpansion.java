@@ -1,24 +1,20 @@
 package com.twilight.claims.placeholder;
 
 import com.twilight.claims.TwilightClaims;
-import com.twilight.claims.config.ClaimsConfig;
 import com.twilight.claims.manager.ClaimManager;
-import me.clip.placeholderapi.PlaceholderAPI;
 import me.clip.placeholderapi.expansion.PlaceholderExpansion;
 import org.bukkit.entity.Player;
+import java.util.Locale;
 
 public class TwilightClaimsExpansion extends PlaceholderExpansion {
 
     private final TwilightClaims plugin;
     private final ClaimManager claim;
-    private final ClaimsConfig cfg;
 
     public TwilightClaimsExpansion(TwilightClaims plugin,
-                                   ClaimManager claim,
-                                   ClaimsConfig cfg) {
+                                   ClaimManager claim) {
         this.plugin = plugin;
         this.claim = claim;
-        this.cfg = cfg;
     }
 
     @Override
@@ -49,42 +45,61 @@ public class TwilightClaimsExpansion extends PlaceholderExpansion {
     @Override
     public String onPlaceholderRequest(Player p, String params) {
 
-        if (p == null) return "";
+        if (p == null || params == null) return "";
 
-        params = params.toLowerCase();
-
-        int used   = claim.getUsed(p);
-        int total  = claim.getTotal(p);
-        int free   = total - used;
-
-        int purchased = getPurchased(p);
-        int hours     = getHoursPlayed(p);
-
-        int perHour   = claim.getPointsPerHourFromGroup(p);
-
-        int hoursPoints = hours * perHour;
+        params = params.toLowerCase(Locale.ROOT);
+        if (!params.matches("points_(total|used|free|purchased|hours_played|hours|per_hour)(_raw)?")) return null;
+        ClaimManager.PointsSnapshot snapshot = claim.getSnapshot(p);
+        long used = snapshot.used();
+        long total = snapshot.total();
+        long free = snapshot.free();
+        int purchased = snapshot.purchased();
+        int hours = snapshot.hoursPlayed();
+        int perHour = snapshot.perHour();
+        long hoursPoints = snapshot.hoursPoints();
 
         switch (params) {
 
             case "points_total":
+                return formatCompact(total);
+
+            case "points_total_raw":
                 return String.valueOf(total);
 
             case "points_used":
+                return formatCompact(used);
+
+            case "points_used_raw":
                 return String.valueOf(used);
 
             case "points_free":
+                return formatCompact(free);
+
+            case "points_free_raw":
                 return String.valueOf(free);
 
             case "points_purchased":
+                return formatCompact(purchased);
+
+            case "points_purchased_raw":
                 return String.valueOf(purchased);
 
             case "points_hours_played":
+                return formatCompact(hours);
+
+            case "points_hours_played_raw":
                 return String.valueOf(hours);
 
             case "points_hours":
+                return formatCompact(hoursPoints);
+
+            case "points_hours_raw":
                 return String.valueOf(hoursPoints);
 
             case "points_per_hour":
+                return formatCompact(perHour);
+
+            case "points_per_hour_raw":
                 return String.valueOf(perHour);
 
             default:
@@ -92,19 +107,12 @@ public class TwilightClaimsExpansion extends PlaceholderExpansion {
         }
     }
 
-    private int getPurchased(Player p) {
-        try {
-            String raw = PlaceholderAPI.setPlaceholders(p, "%yov_player_key:claim_points%");
-            return Integer.parseInt(raw);
-        } catch (Exception ignored) {}
-        return 0;
-    }
+    static String formatCompact(long value) {
+        if (value > -1000 && value < 1000) {
+            return String.valueOf(value);
+        }
 
-    private int getHoursPlayed(Player p) {
-        try {
-            String raw = PlaceholderAPI.setPlaceholders(p, "%statistic_hours_played%");
-            return Integer.parseInt(raw);
-        } catch (Exception ignored) {}
-        return 0;
+        long thousands = Math.abs(value / 1000) + (value % 1000 == 0 ? 0 : 1);
+        return (value < 0 ? "-" : "") + thousands + "k";
     }
 }

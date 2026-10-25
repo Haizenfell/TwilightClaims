@@ -3,6 +3,7 @@ package com.twilight.claims.command.claim;
 import com.sk89q.worldguard.protection.regions.ProtectedRegion;
 import com.twilight.claims.config.Messages;
 import com.twilight.claims.manager.ClaimManager;
+import com.twilight.claims.wg.ClaimIdentity;
 import com.twilight.claims.wg.WGHook;
 import org.bukkit.Bukkit;
 import org.bukkit.entity.Player;
@@ -20,27 +21,27 @@ public class ClaimInfoCommand {
     }
 
     public void execute(Player player) {
-        ProtectedRegion region = wg.getRegionAt(player.getLocation());
+        ProtectedRegion region = wg.getClaimAt(player, player.getLocation());
         if (region == null) {
             msg.send(player, "no_region", s -> s);
             return;
         }
 
-        int area = wg.getArea(region);
-        int used = claim.getUsed(player);
-        int total = claim.getTotal(player);
-        int free = total - used;
+        long area = wg.getArea(region);
+        long used = claim.getUsed(player);
+        long total = claim.getTotal(player);
+        long free = claim.getFree(player);
 
         String ownerName = region.getOwners().getUniqueIds().stream()
                 .findFirst()
                 .map(id -> {
                     String name = Bukkit.getOfflinePlayer(id).getName();
-                    return name == null ? "Unknown" : name;
+                    return name == null ? id.toString() : name;
                 })
                 .orElse("Unknown");
 
         msg.sendList(player, "region_info",
-                s -> s.replace("%id%", region.getId())
+                s -> s.replace("%id%", ClaimIdentity.displayName(region))
                         .replace("%area%", String.valueOf(area))
                         .replace("%used%", String.valueOf(used))
                         .replace("%total%", String.valueOf(total))

@@ -8,391 +8,315 @@ import org.bukkit.Bukkit;
 import org.bukkit.Location;
 import org.bukkit.Material;
 import org.bukkit.World;
+import org.bukkit.block.data.BlockData;
 import org.bukkit.entity.Player;
 import org.bukkit.scheduler.BukkitTask;
 
-import java.util.*;
+import java.util.EnumMap;
+import java.util.HashMap;
+import java.util.LinkedHashMap;
+import java.util.List;
+import java.util.Map;
+import java.util.UUID;
 
 public class RegionVisualizer {
 
-    private final TwilightClaims plugin;
+    private static final int MAX_MARKERS = 8192;
+    private static final int MAX_EDGE_SAMPLES = 4096;
 
+    private final TwilightClaims plugin;
     private final Material cornerMaterial;
     private final Material extendMaterial;
+    private final Material selectedCornerMaterial;
     private final Material cornerMaterialError;
     private final Material extendMaterialError;
-
-    // настройки видимости
+    private final double maxDistance;
     private final double maxDistanceSq;
     private final boolean onlyLoadedChunks;
-
-    private final Map<UUID, List<Location>> activeNormal = new HashMap<>();
-    private final Map<UUID, List<Location>> activeError = new HashMap<>();
-    private final Map<UUID, BukkitTask> clearTasks = new HashMap<>();
-    private final Map<UUID, Long> errorUntil = new HashMap<>();
+    private final int edgeThreshold;
+    private final int stepSmall;
+    private final int stepBig;
+    private final Map<Material, BlockData> blockData = new EnumMap<>(Material.class);
+    private final Map<UUID, View> views = new HashMap<>();
 
     public RegionVisualizer(TwilightClaims plugin) {
         this.plugin = plugin;
+        cornerMaterial = configuredBlock("visual.corner-block", Material.GLOWSTONE);
+        extendMaterial = configuredBlock("visual.extend-block", Material.GOLD_BLOCK);
+        selectedCornerMaterial = configuredBlock("visual.pos1-block", Material.DIAMOND_BLOCK);
+        cornerMaterialError = configuredBlock("visual.corner-block_error", Material.SHROOMLIGHT);
+        extendMaterialError = configuredBlock("visual.extend-block_error", Material.CRIMSON_NYLIUM);
 
-        cornerMaterial = Optional.ofNullable(Material.matchMaterial(
-                plugin.getConfig().getString("visual.corner-block", "GLOWSTONE")
-        )).orElse(Material.GLOWSTONE);
+        double configuredDistance = plugin.getConfig().getDouble("visual.max-distance", 64.0);
+        maxDistance = Double.isFinite(configuredDistance) ? configuredDistance : 64.0;
+        maxDistanceSq = maxDistance > 0 ? maxDistance * maxDistance : -1.0;
+        onlyLoadedChunks = plugin.getConfig().getBoolean("visual.only-loaded-chunks", true);
+        edgeThreshold = Math.max(0, plugin.getConfig().getInt("visual.edge-big-threshold", 10));
+        stepSmall = Math.max(1, plugin.getConfig().getInt("visual.edge-step-small", 3));
+        stepBig = Math.max(1, plugin.getConfig().getInt("visual.edge-step-big", 5));
+    }
 
-        extendMaterial = Optional.ofNullable(Material.matchMaterial(
-                plugin.getConfig().getString("visual.extend-block", "GOLD_BLOCK")
-        )).orElse(Material.GOLD_BLOCK);
-
-        cornerMaterialError = Optional.ofNullable(Material.matchMaterial(
-                plugin.getConfig().getString("visual.corner-block_error", "SHROOMLIGHT")
-        )).orElse(Material.SHROOMLIGHT);
-
-        extendMaterialError = Optional.ofNullable(Material.matchMaterial(
-                plugin.getConfig().getString("visual.extend-block_error", "CRIMSON_NYLIUM")
-        )).orElse(Material.CRIMSON_NYLIUM);
-
-        double maxDist = plugin.getConfig().getDouble("visual.max-distance", 64.0);
-        this.maxDistanceSq = maxDist > 0 ? maxDist * maxDist : -1.0;
-        this.onlyLoadedChunks = plugin.getConfig().getBoolean("visual.only-loaded-chunks", true);
+    private Material configuredBlock(String path, Material fallback) {
+        String name = plugin.getConfig().getString(path, fallback.name());
+        Material material = name == null ? null : Material.matchMaterial(name);
+        if (material == null) {
+            plugin.getLogger().warning("Invalid block material at " + path + "; using " + fallback);
+            material = fallback;
+        }
+        try {
+            blockData.computeIfAbsent(material, Material::createBlockData);
+        } catch (IllegalArgumentException ex) {
+            plugin.getLogger().warning("Invalid block material at " + path + "; using " + fallback);
+            material = fallback;
+            blockData.computeIfAbsent(material, Material::createBlockData);
+        }
+        return material;
     }
 
     public void show(Player player, ProtectedRegion region, CornerType selectedCorner) {
-        UUID id = player.getUniqueId();
+        View view = view(player);
+        cancel(view.normalClear);
+        view.normalClear = null;
+        view.manualNormal = true;
+        view.selectedRegion = selectedCorner == null ? null : region.getId();
+        view.selectedCorner = selectedCorner;
+        view.normal = render(player, List.of(region), view, false);
+        refresh(player, view);
 
-        BukkitTask prev = clearTasks.remove(id);
-        if (prev != null) prev.cancel();
-
-        World world = player.getWorld();
-        List<Location> locations = new ArrayList<>();
-        List<Material> materials = new ArrayList<>();
-        Location origin = player.getLocation();
-
-        addRegionVisualization(world, region, selectedCorner, locations, materials, origin);
-
-        List<Location> current;
-        if (isErrorActive(player)) {
-            clearNormal(player);
-            current = new ArrayList<>();
-        } else {
-            current = activeNormal.getOrDefault(id, new ArrayList<>());
+        int duration = plugin.getConfig().getInt("visual.visual-duration-ticks", 0);
+        if (duration > 0) {
+            UUID id = player.getUniqueId();
+            view.normalClear = Bukkit.getScheduler().runTaskLater(plugin, () -> {
+                view.normalClear = null;
+                view.manualNormal = false;
+                view.normal.clear();
+                view.selectedRegion = null;
+                view.selectedCorner = null;
+                refreshOnline(id, view);
+                discardIfEmpty(id, view);
+            }, duration);
         }
-
-        current.addAll(locations);
-        activeNormal.put(id, current);
-
-        sendBlockChanges(player, locations, materials);
-    }
-
-    public void showErrorTemporary(Player player, ProtectedRegion region, int seconds) {
-        World world = player.getWorld();
-        List<Location> locations = new ArrayList<>();
-        List<Material> materials = new ArrayList<>();
-        Location origin = player.getLocation();
-
-        addRegionVisualizationError(world, region, locations, materials, origin);
-
-        sendBlockChanges(player, locations, materials);
-
-        Bukkit.getScheduler().runTaskLater(plugin, () -> {
-            for (Location loc : locations) {
-                player.sendBlockChange(loc, loc.getBlock().getBlockData());
-            }
-        }, seconds * 20L);
-    }
-
-    public void showErrorNearby(Player player, ProtectedRegion region) {
-        int sec = plugin.getConfig().getInt("visual.stick-error-highlight-seconds", 3);
-        showErrorTemporary(player, region, sec);
-    }
-
-    public void showError(Player player, ProtectedRegion region) {
-        UUID id = player.getUniqueId();
-
-        long duration = plugin.getConfig().getLong("visual.error-duration", 10);
-        errorUntil.put(id, System.currentTimeMillis() + duration * 1000);
-
-        BukkitTask prev = clearTasks.remove(id);
-        if (prev != null) prev.cancel();
-
-        World world = player.getWorld();
-        List<Location> locations = new ArrayList<>();
-        List<Material> materials = new ArrayList<>();
-        Location origin = player.getLocation();
-
-        addRegionVisualizationError(world, region, locations, materials, origin);
-
-        clearError(player);
-        activeError.put(id, new ArrayList<>(locations));
-
-        sendBlockChanges(player, locations, materials);
-    }
-
-    public boolean isErrorActive(Player player) {
-        Long until = errorUntil.get(player.getUniqueId());
-        if (until == null) return false;
-
-        if (System.currentTimeMillis() > until) {
-            errorUntil.remove(player.getUniqueId());
-            return false;
-        }
-
-        return true;
     }
 
     public void showList(Player player, List<ProtectedRegion> regions, CornerType selectedCorner) {
+        View view = view(player);
+        cancel(view.normalClear);
+        view.normalClear = null;
+        view.manualNormal = false;
+        if (selectedCorner != null) view.selectedCorner = selectedCorner;
+        view.normal = render(player, regions, view, false);
+        refresh(player, view);
+        discardIfEmpty(player.getUniqueId(), view);
+    }
+
+    public void showErrorTemporary(Player player, ProtectedRegion region, int seconds) {
+        showError(player, region, seconds);
+    }
+
+    public void showError(Player player, ProtectedRegion region) {
+        showError(player, region, plugin.getConfig().getLong("visual.error-duration", 10));
+    }
+
+    private void showError(Player player, ProtectedRegion region, long seconds) {
+        if (seconds <= 0) return;
+        View view = view(player);
+        cancel(view.errorClear);
+        view.error = render(player, List.of(region), view, true);
+        refresh(player, view);
+
         UUID id = player.getUniqueId();
+        view.errorClear = Bukkit.getScheduler().runTaskLater(plugin, () -> {
+            view.errorClear = null;
+            view.error.clear();
+            refreshOnline(id, view);
+            discardIfEmpty(id, view);
+        }, Math.min(seconds, Long.MAX_VALUE / 20) * 20L);
+    }
 
-        BukkitTask prev = clearTasks.remove(id);
-        if (prev != null) prev.cancel();
+    public boolean isErrorActive(Player player) {
+        View view = views.get(player.getUniqueId());
+        return view != null && view.errorClear != null;
+    }
 
-        clearNormal(player);
+    private View view(Player player) {
+        UUID id = player.getUniqueId();
+        View previous = views.get(id);
+        if (previous != null && !previous.worldId.equals(player.getWorld().getUID())) {
+            clear(player);
+        }
+        return views.computeIfAbsent(id, ignored -> new View(player.getWorld().getUID()));
+    }
 
-        World world = player.getWorld();
-        List<Location> locations = new ArrayList<>();
-        List<Material> materials = new ArrayList<>();
+    private Map<Location, Material> render(Player player, List<ProtectedRegion> regions, View view, boolean error) {
+        Map<Location, Material> markers = new LinkedHashMap<>();
         Location origin = player.getLocation();
-
+        World world = player.getWorld();
         for (ProtectedRegion region : regions) {
-            addRegionVisualization(world, region, selectedCorner, locations, materials, origin);
-        }
-
-        sendBlockChanges(player, locations, materials);
-
-        activeNormal.put(id, locations);
-    }
-
-    // ====== ВИЗУАЛИЗАЦИЯ РЕГИОНА C ФИЛЬТРОМ ДИСТАНЦИИ / ЧАНКОВ ======
-
-    private void addRegionVisualization(
-            World world,
-            ProtectedRegion region,
-            CornerType selectedCorner,
-            List<Location> locations,
-            List<Material> materials,
-            Location origin
-    ) {
-        BlockVector3 min = region.getMinimumPoint();
-        BlockVector3 max = region.getMaximumPoint();
-
-        int sizeX = Math.abs(max.x() - min.x());
-        int sizeZ = Math.abs(max.z() - min.z());
-        boolean big = sizeX > 6 || sizeZ > 6;
-
-        addCorner(locations, materials, world, min.x(), min.z(), CornerType.MIN_MIN, selectedCorner, origin);
-        addCorner(locations, materials, world, min.x(), max.z(), CornerType.MIN_MAX, selectedCorner, origin);
-        addCorner(locations, materials, world, max.x(), min.z(), CornerType.MAX_MIN, selectedCorner, origin);
-        addCorner(locations, materials, world, max.x(), max.z(), CornerType.MAX_MAX, selectedCorner, origin);
-
-        if (big) {
-            addEdge(locations, materials, world, min.x(), min.z(), max.x(), min.z(), origin);
-            addEdge(locations, materials, world, min.x(), max.z(), max.x(), max.z(), origin);
-            addEdge(locations, materials, world, min.x(), min.z(), min.x(), max.z(), origin);
-            addEdge(locations, materials, world, max.x(), min.z(), max.x(), max.z(), origin);
-        }
-    }
-
-    private void addRegionVisualizationError(
-            World world,
-            ProtectedRegion region,
-            List<Location> locations,
-            List<Material> materials,
-            Location origin
-    ) {
-        BlockVector3 min = region.getMinimumPoint();
-        BlockVector3 max = region.getMaximumPoint();
-
-        int sizeX = Math.abs(max.x() - min.x());
-        int sizeZ = Math.abs(max.z() - min.z());
-        boolean big = sizeX > 6 || sizeZ > 6;
-
-        addCornerError(locations, materials, world, min.x(), min.z(), CornerType.MIN_MIN, origin);
-        addCornerError(locations, materials, world, min.x(), max.z(), CornerType.MIN_MAX, origin);
-        addCornerError(locations, materials, world, max.x(), min.z(), CornerType.MAX_MIN, origin);
-        addCornerError(locations, materials, world, max.x(), max.z(), CornerType.MAX_MAX, origin);
-
-        if (big) {
-            addEdgeError(locations, materials, world, min.x(), min.z(), max.x(), min.z(), origin);
-            addEdgeError(locations, materials, world, min.x(), max.z(), max.x(), max.z(), origin);
-            addEdgeError(locations, materials, world, min.x(), min.z(), min.x(), max.z(), origin);
-            addEdgeError(locations, materials, world, max.x(), min.z(), max.x(), max.z(), origin);
-        }
-    }
-
-    // ====== УГЛЫ / РЁБРА С ФИЛЬТРОМ ======
-
-    private void addCorner(
-            List<Location> locations,
-            List<Material> materials,
-            World world,
-            int x,
-            int z,
-            CornerType type,
-            CornerType selectedCorner,
-            Location origin
-    ) {
-        if (selectedCorner != type) {
-            addLocationIfVisible(locations, materials, world, x, z, cornerMaterial, origin);
-        }
-
-        int dx = (type == CornerType.MIN_MIN || type == CornerType.MIN_MAX) ? 1 : -1;
-        int dz = (type == CornerType.MIN_MIN || type == CornerType.MAX_MIN) ? 1 : -1;
-
-        addLocationIfVisible(locations, materials, world, x + dx, z, extendMaterial, origin);
-        addLocationIfVisible(locations, materials, world, x, z + dz, extendMaterial, origin);
-    }
-
-    private void addCornerError(
-            List<Location> locations,
-            List<Material> materials,
-            World world,
-            int x,
-            int z,
-            CornerType type,
-            Location origin
-    ) {
-        addLocationIfVisible(locations, materials, world, x, z, cornerMaterialError, origin);
-
-        int dx = (type == CornerType.MIN_MIN || type == CornerType.MIN_MAX) ? 1 : -1;
-        int dz = (type == CornerType.MIN_MIN || type == CornerType.MAX_MIN) ? 1 : -1;
-
-        addLocationIfVisible(locations, materials, world, x + dx, z, extendMaterialError, origin);
-        addLocationIfVisible(locations, materials, world, x, z + dz, extendMaterialError, origin);
-    }
-
-    private void addEdge(
-            List<Location> locations,
-            List<Material> materials,
-            World world,
-            int x1,
-            int z1,
-            int x2,
-            int z2,
-            Location origin
-    ) {
-        int dx = x2 - x1;
-        int dz = z2 - z1;
-        int length = Math.abs(dx) + Math.abs(dz);
-
-        int threshold = plugin.getConfig().getInt("visual.edge-big-threshold", 10);
-        int stepSmall = plugin.getConfig().getInt("visual.edge-step-small", 3);
-        int stepBig = plugin.getConfig().getInt("visual.edge-step-big", 5);
-
-        int step = length > threshold ? stepBig : stepSmall;
-
-        int sx = Integer.signum(dx);
-        int sz = Integer.signum(dz);
-
-        for (int i = step; i < length; i += step) {
-            int x = x1 + sx * i;
-            int z = z1 + sz * i;
-
-            addLocationIfVisible(locations, materials, world, x, z, extendMaterial, origin);
-        }
-    }
-
-    private void addEdgeError(
-            List<Location> locations,
-            List<Material> materials,
-            World world,
-            int x1,
-            int z1,
-            int x2,
-            int z2,
-            Location origin
-    ) {
-        int dx = x2 - x1;
-        int dz = z2 - z1;
-        int length = Math.abs(dx) + Math.abs(dz);
-
-        int threshold = plugin.getConfig().getInt("visual.edge-big-threshold", 10);
-        int stepSmall = plugin.getConfig().getInt("visual.edge-step-small", 3);
-        int stepBig = plugin.getConfig().getInt("visual.edge-step-big", 5);
-
-        int step = length > threshold ? stepBig : stepSmall;
-
-        int sx = Integer.signum(dx);
-        int sz = Integer.signum(dz);
-
-        for (int i = step; i < length; i += step) {
-            int x = x1 + sx * i;
-            int z = z1 + sz * i;
-
-            addLocationIfVisible(locations, materials, world, x, z, extendMaterialError, origin);
-        }
-    }
-
-    // ====== ХЕЛПЕРЫ ВИДИМОСТИ / ОТПРАВКИ ======
-
-    private boolean isVisible(World world, int x, int z, Location origin) {
-        if (origin != null && maxDistanceSq > 0 && origin.getWorld() == world) {
-            double dx = origin.getX() - x;
-            double dz = origin.getZ() - z;
-            if ((dx * dx + dz * dz) > maxDistanceSq) {
-                return false;
+            if (markers.size() >= MAX_MARKERS) break;
+            BlockVector3 min = region.getMinimumPoint();
+            BlockVector3 max = region.getMaximumPoint();
+            CornerType selected = region.getId().equals(view.selectedRegion) ? view.selectedCorner : null;
+            boolean extendX = min.x() < max.x();
+            boolean extendZ = min.z() < max.z();
+            addCorner(markers, world, min.x(), min.z(), CornerType.MIN_MIN, selected, origin, error, extendX, extendZ);
+            addCorner(markers, world, min.x(), max.z(), CornerType.MIN_MAX, selected, origin, error, extendX, extendZ);
+            addCorner(markers, world, max.x(), min.z(), CornerType.MAX_MIN, selected, origin, error, extendX, extendZ);
+            addCorner(markers, world, max.x(), max.z(), CornerType.MAX_MAX, selected, origin, error, extendX, extendZ);
+            if ((long) max.x() - min.x() > 6 || (long) max.z() - min.z() > 6) {
+                Material material = error ? extendMaterialError : extendMaterial;
+                addEdge(markers, world, min.x(), min.z(), max.x(), min.z(), material, origin);
+                addEdge(markers, world, min.x(), max.z(), max.x(), max.z(), material, origin);
+                addEdge(markers, world, min.x(), min.z(), min.x(), max.z(), material, origin);
+                addEdge(markers, world, max.x(), min.z(), max.x(), max.z(), material, origin);
+            }
+            if (selected != null && !error) {
+                int x = selected == CornerType.MIN_MIN || selected == CornerType.MIN_MAX ? min.x() : max.x();
+                int z = selected == CornerType.MIN_MIN || selected == CornerType.MAX_MIN ? min.z() : max.z();
+                addMarker(markers, world, x, z, selectedCornerMaterial, origin, true);
             }
         }
+        return markers;
+    }
 
-        if (onlyLoadedChunks) {
-            int cx = x >> 4;
-            int cz = z >> 4;
-            if (!world.isChunkLoaded(cx, cz)) {
-                return false;
+    private void addCorner(Map<Location, Material> markers, World world, int x, int z, CornerType type,
+                           CornerType selected, Location origin, boolean error, boolean extendX, boolean extendZ) {
+        Material material = error ? cornerMaterialError : selected == type ? selectedCornerMaterial : cornerMaterial;
+        addMarker(markers, world, x, z, material, origin, true);
+        int dx = type == CornerType.MIN_MIN || type == CornerType.MIN_MAX ? 1 : -1;
+        int dz = type == CornerType.MIN_MIN || type == CornerType.MAX_MIN ? 1 : -1;
+        if (extendX) addMarker(markers, world, (long) x + dx, z, error ? extendMaterialError : extendMaterial, origin);
+        if (extendZ) addMarker(markers, world, x, (long) z + dz, error ? extendMaterialError : extendMaterial, origin);
+    }
+
+    private void addEdge(Map<Location, Material> markers, World world, int x1, int z1, int x2, int z2,
+                         Material material, Location origin) {
+        long dx = (long) x2 - x1;
+        long dz = (long) z2 - z1;
+        long length = Math.abs(dx) + Math.abs(dz);
+        int step = length > edgeThreshold ? stepBig : stepSmall;
+        int sx = Long.signum(dx);
+        int sz = Long.signum(dz);
+        long first = step;
+        long last = length - 1;
+        if (maxDistance > 0) {
+            double offset = sx == 0 ? origin.getZ() - z1 : origin.getX() - x1;
+            int direction = sx == 0 ? sz : sx;
+            long visibleStart = (long) Math.ceil(offset * direction - maxDistance);
+            first = Math.max(first, alignedOffset(visibleStart, step));
+            last = Math.min(last, (long) Math.floor(offset * direction + maxDistance));
+        }
+        int samples = 0;
+        for (long i = first; i <= last && samples < MAX_EDGE_SAMPLES && markers.size() < MAX_MARKERS;
+             i += step, samples++) {
+            addMarker(markers, world, x1 + sx * i, z1 + sz * i, material, origin);
+        }
+    }
+
+    static long alignedOffset(long start, int step) {
+        long positiveStart = Math.max(1L, start);
+        return ((positiveStart - 1) / Math.max(1, step) + 1) * Math.max(1, step);
+    }
+
+    private void addMarker(Map<Location, Material> markers, World world, long x, long z,
+                           Material material, Location origin) {
+        addMarker(markers, world, x, z, material, origin, false);
+    }
+
+    private void addMarker(Map<Location, Material> markers, World world, long x, long z,
+                           Material material, Location origin, boolean corner) {
+        if (markers.size() >= MAX_MARKERS || x < Integer.MIN_VALUE || x > Integer.MAX_VALUE
+                || z < Integer.MIN_VALUE || z > Integer.MAX_VALUE) return;
+        double dx = origin.getX() - x;
+        double dz = origin.getZ() - z;
+        if (maxDistanceSq > 0 && dx * dx + dz * dz > maxDistanceSq) return;
+        int blockX = (int) x;
+        int blockZ = (int) z;
+        if (onlyLoadedChunks && !world.isChunkLoaded(blockX >> 4, blockZ >> 4)) return;
+        int y = world.getHighestBlockYAt(blockX, blockZ);
+        Location location = new Location(world, blockX, y, blockZ);
+        if (corner) markers.put(location, material);
+        else markers.putIfAbsent(location, material);
+    }
+
+    private void refreshOnline(UUID id, View view) {
+        Player player = Bukkit.getPlayer(id);
+        if (player != null && player.isOnline()) refresh(player, view);
+    }
+
+    private void refresh(Player player, View view) {
+        Map<Location, Material> next = new LinkedHashMap<>(view.normal);
+        next.putAll(view.error);
+        for (Location location : view.rendered.keySet()) {
+            if (!next.containsKey(location)) restore(player, location);
+        }
+        for (var marker : next.entrySet()) {
+            if (marker.getValue() != view.rendered.get(marker.getKey())) {
+                player.sendBlockChange(marker.getKey(), blockData.get(marker.getValue()));
             }
         }
-
-        return true;
+        view.rendered = next;
     }
 
-    private void addLocationIfVisible(
-            List<Location> locations,
-            List<Material> materials,
-            World world,
-            int x,
-            int z,
-            Material material,
-            Location origin
-    ) {
-        if (!isVisible(world, x, z, origin)) return;
-
-        int y = world.getHighestBlockYAt(x, z);
-        locations.add(new Location(world, x, y, z));
-        materials.add(material);
-    }
-
-    private void sendBlockChanges(Player player, List<Location> locations, List<Material> materials) {
-        for (int i = 0; i < locations.size(); i++) {
-            player.sendBlockChange(locations.get(i), materials.get(i).createBlockData());
+    private void restore(Player player, Location location) {
+        World world = location.getWorld();
+        if (player.isOnline() && world != null && world.equals(player.getWorld())
+                && world.isChunkLoaded(location.getBlockX() >> 4, location.getBlockZ() >> 4)) {
+            player.sendBlockChange(location, location.getBlock().getBlockData());
         }
     }
 
-    // ====== ОЧИСТКА ======
-
-    private void clearNormal(Player player) {
-        UUID id = player.getUniqueId();
-        List<Location> list = activeNormal.remove(id);
-        if (list == null) return;
-
-        for (Location loc : list) {
-            player.sendBlockChange(loc, loc.getBlock().getBlockData());
-        }
+    public void clear(Player player) {
+        View view = views.remove(player.getUniqueId());
+        if (view == null) return;
+        cancel(view.normalClear);
+        cancel(view.errorClear);
+        for (Location location : view.rendered.keySet()) restore(player, location);
     }
 
-    private void clearError(Player player) {
-        UUID id = player.getUniqueId();
-        List<Location> list = activeError.remove(id);
-        if (list == null) return;
-
-        for (Location loc : list) {
-            player.sendBlockChange(loc, loc.getBlock().getBlockData());
-        }
+    public void clearAutomatic(Player player) {
+        View view = views.get(player.getUniqueId());
+        if (view == null || view.manualNormal) return;
+        view.normal.clear();
+        view.selectedRegion = null;
+        view.selectedCorner = null;
+        refresh(player, view);
+        discardIfEmpty(player.getUniqueId(), view);
     }
 
-    public void clear(Player player, boolean delayed) {
-        UUID id = player.getUniqueId();
+    public void close() {
+        for (var entry : views.entrySet()) {
+            cancel(entry.getValue().normalClear);
+            cancel(entry.getValue().errorClear);
+            Player player = Bukkit.getPlayer(entry.getKey());
+            if (player != null) {
+                for (Location location : entry.getValue().rendered.keySet()) restore(player, location);
+            }
+        }
+        views.clear();
+    }
 
-        BukkitTask prev = clearTasks.remove(id);
-        if (prev != null) prev.cancel();
+    private void discardIfEmpty(UUID id, View view) {
+        if (view.selectedRegion == null && view.normal.isEmpty() && view.error.isEmpty()
+                && view.normalClear == null && view.errorClear == null) views.remove(id, view);
+    }
 
-        clearNormal(player);
-        clearError(player);
+    private static void cancel(BukkitTask task) {
+        if (task != null) task.cancel();
+    }
+
+    private static final class View {
+        private final UUID worldId;
+        private Map<Location, Material> normal = new LinkedHashMap<>();
+        private Map<Location, Material> error = new LinkedHashMap<>();
+        private Map<Location, Material> rendered = new LinkedHashMap<>();
+        private BukkitTask normalClear;
+        private BukkitTask errorClear;
+        private boolean manualNormal;
+        private String selectedRegion;
+        private CornerType selectedCorner;
+
+        private View(UUID worldId) {
+            this.worldId = worldId;
+        }
     }
 }

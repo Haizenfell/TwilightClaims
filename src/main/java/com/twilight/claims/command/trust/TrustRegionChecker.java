@@ -16,15 +16,19 @@ public class TrustRegionChecker {
     }
 
     public ProtectedRegion getRegionOwned(Player player) {
-        ProtectedRegion region = wg.getRegionAt(player.getLocation());
+        return getRegionOwned(player, player);
+    }
+
+    public ProtectedRegion getRegionOwned(Player receiver, Player owner) {
+        ProtectedRegion region = wg.getClaimAt(owner, owner.getLocation());
 
         if (region == null) {
-            msg.send(player, "no_region", x -> x);
+            msg.send(receiver, "no_region", x -> x);
             return null;
         }
 
-        if (!region.getOwners().contains(player.getUniqueId())) {
-            msg.send(player, "not_owner", x -> x);
+        if (!wg.isOwner(owner, region)) {
+            msg.send(receiver, "not_owner", x -> x);
             return null;
         }
 

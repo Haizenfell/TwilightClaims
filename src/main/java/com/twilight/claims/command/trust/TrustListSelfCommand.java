@@ -1,6 +1,7 @@
 package com.twilight.claims.command.trust;
 
 import com.twilight.claims.config.Messages;
+import com.twilight.claims.wg.ClaimIdentity;
 import com.sk89q.worldguard.protection.regions.ProtectedRegion;
 import org.bukkit.Bukkit;
 import org.bukkit.OfflinePlayer;
@@ -21,11 +22,13 @@ public class TrustListSelfCommand {
         Set<UUID> trusted = region.getMembers().getUniqueIds();
 
         msg.send(player, "trust_list_header_region",
-                x -> x.replace("%region%", region.getId()));
+                x -> x.replace("%region%", ClaimIdentity.displayName(region))
+                        .replace("%owner%", TrustTargetResolver.displayName(player, "Unknown")));
 
         if (trusted.isEmpty()) {
             msg.send(player, "trust_list_empty_region",
-                    x -> x.replace("%region%", region.getId()));
+                    x -> x.replace("%region%", ClaimIdentity.displayName(region))
+                            .replace("%owner%", TrustTargetResolver.displayName(player, "Unknown")));
             return;
         }
 

@@ -1,48 +1,35 @@
 package com.twilight.claims.command.claim;
 
 import com.sk89q.worldguard.protection.regions.ProtectedRegion;
-import com.twilight.claims.config.ClaimsConfig;
 import com.twilight.claims.config.Messages;
 import com.twilight.claims.manager.ClaimManager;
+import com.twilight.claims.wg.ClaimIdentity;
 import com.twilight.claims.wg.WGHook;
-import me.clip.placeholderapi.PlaceholderAPI;
 import org.bukkit.entity.Player;
 
 import java.util.List;
+import java.util.Objects;
 
 public class ClaimPointsCommand {
 
-    private final ClaimsConfig cfg;
     private final Messages msg;
     private final ClaimManager claim;
     private final WGHook wg;
 
-    public ClaimPointsCommand(ClaimsConfig cfg, Messages msg, ClaimManager claim, WGHook wg) {
-        this.cfg = cfg;
+    public ClaimPointsCommand(Messages msg, ClaimManager claim, WGHook wg) {
         this.msg = msg;
         this.claim = claim;
         this.wg = wg;
     }
 
     public void execute(Player player) {
-        int used = claim.getUsed(player);
-        int total = claim.getTotal(player);
-        int free = total - used;
+        long used = claim.getUsed(player);
+        long total = claim.getTotal(player);
+        long free = claim.getFree(player);
 
-        int purchased = 0;
-        try {
-            purchased = Integer.parseInt(
-                    PlaceholderAPI.setPlaceholders(player, "%yov_player_key:claim_points%"));
-        } catch (Exception ignored) {}
-
-        int hours = 0;
-        try {
-            hours = Integer.parseInt(
-                    PlaceholderAPI.setPlaceholders(player, "%statistic_hours_played%"));
-        } catch (Exception ignored) {}
-
+        int purchased = claim.getPurchasedPoints(player);
         int perHour = claim.getPointsPerHourFromGroup(player);
-        int hoursPoints = hours * perHour;
+        long hoursPoints = claim.getHoursPoints(player);
 
 
         List<ProtectedRegion> regions = wg.getRegionsOwnedBy(player);
@@ -67,13 +54,14 @@ public class ClaimPointsCommand {
         for (ProtectedRegion r : regions) {
 
             final int idx = index;
-            final int areaFinal = wg.getArea(r);
-            final String id = r.getId();
+            final long areaFinal = wg.getArea(r);
+            final String id = ClaimIdentity.displayName(r);
 
             msg.send(player, "claim_points_entry",
                     s -> s.replace("%index%", String.valueOf(idx))
                             .replace("%area%", String.valueOf(areaFinal))
-                            .replace("%id%", id));
+                            .replace("%id%", id)
+                            .replace("%owner%", Objects.toString(player.getName(), "Unknown")));
 
             index++;
         }

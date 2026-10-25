@@ -1,19 +1,37 @@
 name: TwilightClaims
 main: com.twilight.claims.TwilightClaims
-version: 1.1
-api-version: 1.21
+version: '${project.version}'
+api-version: '26.3'
 author: Haizenfell
 description: WorldGuard-based claim system.
 
-depend: [WorldGuard]
+depend: [WorldGuard, WorldEdit]
 softdepend: [PlaceholderAPI]
 
 commands:
   claim:
-    permission: twilight.claim.command.claim
+    description: Create and manage WorldGuard-backed claims.
   trust:
-    permission: twilight.claim.command.trust
+    description: Add a player to the current claim members.
   untrust:
-    permission: twilight.claim.command.untrust
+    description: Remove a player from the current claim members.
   trustlist:
-    permission: twilight.claim.command.trustlist
+    description: Show trusted players for a claim.
+
+permissions:
+  twilight.claim.command.claim:
+    default: op
+  twilight.claim.command.claimpoints:
+    default: op
+  twilight.claim.command.unclaim:
+    default: op
+  twilight.claim.command.claimtool:
+    default: op
+  twilight.claim.command.trust:
+    default: op
+  twilight.claim.command.untrust:
+    default: op
+  twilight.claim.command.trustlist:
+    default: op
+  twilight.claim.points.*:
+    default: false

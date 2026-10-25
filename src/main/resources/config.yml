@@ -1,6 +1,11 @@
 claim:
   min-radius: 5
 
+world-names:
+  world: "&aOverworld"
+  world_nether: "&cNether"
+  world_the_end: "&dEnd"
+
 points:
   per-hour-default: 50
   groups:
@@ -15,7 +20,6 @@ points:
     eclipse: 90
     moonlight: 100
     dev: 100
-# twilight.claim.points.ember
 
 tools:
   shovel:
@@ -58,7 +62,7 @@ stick-tool:
       header: "&6Region Info:"
       entry: "&7ID: &f%id% &7Owner: &f%owner% &7Area: &f%area%"
     no-nearby: "&9No claimed regions nearby."
-    nearest-format: "&eNearest region: &f%owner% &7(%distance%m) %arrow%"
+    nearest-format: "&eNearest region: &f%owner% &7/ &a%id% &7(%distance%m) %arrow%"
 
   arrows:
     front: "&f↑"
@@ -67,8 +71,8 @@ stick-tool:
     right: "&f→"
 
 visual:
-  max-distance: 64          # макс. дистанция визуала от игрока, <=0 = без лимита
-  only-loaded-chunks: true  # рисовать только в загруженных чанках
+  max-distance: 64
+  only-loaded-chunks: true
   edge-step-small: 3
   edge-step-big: 5
   edge-big-threshold: 10
@@ -89,10 +93,10 @@ messages:
   claim_points_per_hour: "&7Points per hour: &e%per_hour%"
   claim_points_purchased: "&7Purchased points: &e%purchased%"
   claim_points_hours: "&7Points from playtime: &e%hours_points%"
-  claim_points_entry: "&7Claim &e%index%&7: (&a%id%&7): &e%area% &7points"
+  claim_points_entry: "&7- &e%owner% &7/ &a%id%&7: &e%area% &7points"
 
   trust_list_empty_region: "&7Claim has no trusted players"
-  trust_list_header_region: "&9[⚐] &7Trusted players for claim &a%region%&7:"
+  trust_list_header_region: "&9[⚐] &7Trusted players for &e%owner% &7/ &a%region%&7:"
   trust_already: "&9[⚐] &7Player &e%player% &7is already trusted!"
   trust_not_in_list: "&c[⚐] &7Player &e%player% &7is not trusted"
   trust_target_not_online: "&c[⚐] &7Player &e%player% &7must be online"
@@ -100,6 +104,7 @@ messages:
   trust_list_other_empty: "&7Player &e%player% &7has no trusted players"
 
   no_permission: "&c[⚐]You don't have permission for this action"
+  unknown_subcommand: "&c[⚐] Unknown subcommand. Use /claim info|points|list|unclaim|tool."
   claimtool_usage: "&9[⚐]Usage: &6/%label% <shovel|stick>"
   claimtool_give_shovel: "&9[⚐] You received the &9Claim shovel"
   claimtool_give_stick: "&9[⚐] You received the &9Claim stick"
@@ -109,31 +114,53 @@ messages:
   trust_not_found: "&c[⚐] Player &e%player% &cnot found!"
   trust_list_entry: "&7- &e%player%"
 
-  region_create_conflict: "&c[⚐] Cannot create a claim — it overlaps with %owner%&c's claim!"
+  region_create_conflict: "&c[⚐] Cannot create a claim — it overlaps with %owner%&c's %region%!"
   region_owner_unknown: "&c[⚐] Unknown player"
   region_manager_null: "&c[⚐] Error: RegionManager not found for world &e%world%&c!"
-  region_too_small: "&c[⚐] The minimum claim size is 10x10 blocks!"
+  region_too_small: "&c[⚐] The minimum claim size is %size%x%size% blocks!"
+  region_save_failed: "&c[⚐] Cannot save the claim. Please contact an administrator."
+  region_has_children: "&c[⚐] This claim has child regions. Please contact an administrator."
+  region_invalid_size: "&c[⚐] Invalid claim size or coordinates outside the world border."
   region_too_close: "&c[⚐] Cannot modify claim! Too close to %owner%&c's claim!"
   no_region: "&c[⚐] There is no claim here"
   not_owner: "&c[⚐] You are not the owner of this claim"
   click_inside_region: "&9[⚐] &7Type &9/claim unclaim &7to delete this claim"
 
-  region_create: "&9[⚐] &7Claim &e%id% &acreated with size &e%area% &ablocks"
-  region_delete: "&9[⚐] &7Claim deleted. Freed &e%area% &7claim points"
+  region_create: "&9[⚐] &e%owner% &7/ &a%id% &7created with size &e%area% &7blocks"
+  region_delete: "&9[⚐] &e%owner% &7/ &a%id% &7deleted. Freed &e%area% &7claim points"
 
   region_info:
+    - "&9[⚐] &7Claim: &a%id%"
     - "&9[⚐] &7Owner: &e%owner%"
     - "&9[⚐] &7Area: &a%area%"
     - "&9[⚐] &7Claim points: &e%used%&6/&e%total% &7(free: %free%)"
 
-  trust_add: "&9[⚐] &7Player &e%player% &awas added to trusted"
-  trust_remove: "&9[⚐] &7Player &e%player% &awas removed from trusted"
+  trust_add: "&9[⚐] &7Player &e%player% &awas added to trusted for &e%owner% &7/ &a%region%"
+  trust_remove: "&9[⚐] &7Player &e%player% &awas removed from trusted for &e%owner% &7/ &a%region%"
   trust_list_header: "&9[⚐] &7Trusted players:"
   trust_list_empty: "&7- Nobody."
 
-  claim_list_header: "&9[⚐] &7Your claims:"
+  claim_list_header: "&9[⚐] &e%owner% &7claims: &8(%page%/%pages%)"
   claim_list_empty: "&7You have no claims"
-  claim_list_entry: "&7- &a%id% &7(&e%area% &7blocks)"
+  claim_list_entry: "&7- &a%id% &8| &f%x%, %z% &8| &r%world% &8| &e%area% &7blocks²"
+  claim_list_remove: "&c[Remove]"
+  claim_list_remove_hover: "&7Request deletion of &a%id%&7. Confirmation required."
+  claim_list_previous: "&9[← Previous]"
+  claim_list_next: "&9[Next →]"
+  claim_list_usage: "&c[⚐] Usage: /claim list [positive page number]"
+  claim_list_page_missing: "&c[⚐] This page does not exist. Available pages: %pages%."
+  claim_delete_confirm:
+    - "&c[⚐] Delete &e%owner% &7/ &a%id%&c?"
+    - "&7Center: &f%x%, %z% &8| &r%world%"
+    - "&7Area: &e%area% &7blocks². Claim points freed: &e%area%&7."
+    - "&7Confirmation expires in 30 seconds."
+  claim_delete_confirm_button: "&c[Confirm deletion]"
+  claim_delete_confirm_hover: "&cDelete %id% and remove its protection."
+  claim_delete_cancel_button: "&a[Cancel]"
+  claim_delete_cancelled: "&9[⚐] &7Claim deletion cancelled."
+  claim_action_expired: "&c[⚐] This action expired or was already used. Open /claim list again."
+  claim_delete_changed: "&c[⚐] This claim was changed or deleted. Open /claim list again."
+  claim_world_unavailable: "&c[⚐] The claim's world is not loaded."
 
   not_enough_points: "&c[⚐] Not enough claim points. Required: &e%need%, &cavailable: &e%free%"
   select_corner: "&9[⚐] &7Corner selected: &9%corner%. &aRight-click &7another block"
@@ -147,4 +174,4 @@ messages:
     - "&9[⚐] &7Area: &e%area%"
 
 actionbar:
-  duration-ticks: 100  #ticks
+  duration-ticks: 100
