@@ -2,6 +2,7 @@ package com.twilight.claims.command.trust;
 
 import com.twilight.claims.config.Messages;
 import com.twilight.claims.wg.WGHook;
+import com.twilight.claims.managed.ManagedRegions;
 import com.sk89q.worldguard.protection.regions.ProtectedRegion;
 import org.bukkit.entity.Player;
 
@@ -28,7 +29,7 @@ public class TrustRegionChecker {
         }
 
         if (!wg.isOwner(owner, region)) {
-            msg.send(receiver, "not_owner", x -> x);
+            msg.send(receiver, ManagedRegions.isManaged(region) ? "managed_region_locked" : "not_owner", x -> x);
             return null;
         }
 

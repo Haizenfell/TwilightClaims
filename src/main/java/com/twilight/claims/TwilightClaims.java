@@ -3,6 +3,12 @@ package com.twilight.claims;
 import com.twilight.claims.command.ClaimCommand;
 import com.twilight.claims.api.TwilightClaimsApi;
 import com.twilight.claims.api.DefaultTwilightClaimsApi;
+import com.twilight.claims.api.managed.ManagedClaimsApi;
+import com.twilight.claims.api.managed.ManagedLifecycle;
+import com.twilight.claims.api.managed.event.ManagedClaimPersistedEvent;
+import com.twilight.claims.managed.DefaultManagedClaimsApi;
+import com.twilight.claims.managed.ManagedAccessListener;
+import com.twilight.claims.managed.ManagedAdminCommand;
 import com.twilight.claims.command.CommandManager;
 import com.twilight.claims.command.TrustCommand;
 import com.twilight.claims.command.claim.ClaimDeletionService;
@@ -41,6 +47,7 @@ public class TwilightClaims extends JavaPlugin {
     private TwilightClaimsExpansion expansion;
     private ClaimDeletionService deletions;
     private DefaultTwilightClaimsApi api;
+    private DefaultManagedClaimsApi managedApi;
 
     public TwilightClaimsApi getApi() {
         if (api == null || !isEnabled()) throw new IllegalStateException("TwilightClaims is not enabled");
@@ -78,6 +85,28 @@ public class TwilightClaims extends JavaPlugin {
         visualizer = new RegionVisualizer(this);
         deletions = new ClaimDeletionService(wgHook, messages, visualizer);
         api = new DefaultTwilightClaimsApi(this, wgHook, claimsConfig, claimManager, visualizer, deletions, messages);
+        managedApi = new DefaultManagedClaimsApi(this, wgHook, claimsConfig);
+        Bukkit.getPluginManager().registerEvents(new ManagedAccessListener(wgHook,
+                managedApi::isAuthorized, managedApi::isProtectionReady, managedApi::hasManagedClaims), this);
+        Bukkit.getPluginManager().registerEvents(new Listener() {
+            @EventHandler
+            public void onManagedPersisted(ManagedClaimPersistedEvent event) {
+                var snapshot = event.getResult().snapshot();
+                var world = Bukkit.getWorld(snapshot.key().worldId());
+                if (world == null) return;
+                try {
+                    if (snapshot.lifecycle() == ManagedLifecycle.DELETED) {
+                        visualizer.clearRegion(world, snapshot.key().regionId());
+                    } else {
+                        var region = wgHook.getClaim(snapshot.key().worldId(), snapshot.key().regionId());
+                        if (region != null) visualizer.refreshRegion(world, region);
+                    }
+                } catch (RuntimeException exception) {
+                    getLogger().warning("Managed state saved, boundary refresh failed: " + exception.getMessage());
+                }
+            }
+        }, this);
+        Objects.requireNonNull(getCommand("claimsmanaged")).setExecutor(new ManagedAdminCommand(managedApi));
         Bukkit.getPluginManager().registerEvents(deletions, this);
 
         Plugin papi = Bukkit.getPluginManager().getPlugin("PlaceholderAPI");
@@ -133,6 +162,7 @@ public class TwilightClaims extends JavaPlugin {
                 () -> Bukkit.getOnlinePlayers().forEach(claimManager::refresh), 1L, 20L);
 
         Bukkit.getServicesManager().register(TwilightClaimsApi.class, api, this, ServicePriority.Normal);
+        Bukkit.getServicesManager().register(ManagedClaimsApi.class, managedApi, this, ServicePriority.Normal);
         getLogger().info("TwilightClaims enabled.");
     }
 
@@ -144,6 +174,7 @@ public class TwilightClaims extends JavaPlugin {
     @Override
     public void onDisable() {
         Bukkit.getServicesManager().unregisterAll(this);
+        if (managedApi != null) managedApi.close();
         if (api != null) api.close();
         if (deletions != null) deletions.close();
         if (visualizer != null) visualizer.close();

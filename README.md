@@ -1,6 +1,6 @@
 # TwilightClaims
 
-TwilightClaims is a Paper plugin that turns WorldGuard regions into player claims. Each claim is a full-height cuboid region stored by WorldGuard, with its owners, members and flags. No separate claim database is required.
+TwilightClaims is a Paper plugin that turns WorldGuard regions into player claims. Personal claims are full-height cuboid regions stored by WorldGuard, with their owners, members and flags. Plugins can also create externally managed regions whose authoritative state and operation receipts are stored in TwilightClaims’ local managed journal.
 
 Players can create claims, resize them with a shovel, inspect them with a stick, manage trusted players and delete claims remotely from a clickable list. Claim points limit the total area a player can own.
 
@@ -23,7 +23,7 @@ Set `JAVA_HOME` to a JDK 26 installation and run:
 mvn clean package
 ```
 
-The plugin JAR is `target/TwilightClaims-1.6.0.jar`. The build also produces `target/TwilightClaims-1.6.0-api.jar` for other plugin developers.
+The plugin JAR is `target/TwilightClaims-1.7.0.jar`. The build also produces `target/TwilightClaims-1.7.0-api.jar` for other plugin developers.
 
 1. Install WorldEdit and WorldGuard on the server.
 2. Install PlaceholderAPI if you need purchased points or the plugin's placeholders.
@@ -36,6 +36,7 @@ The plugin JAR is `target/TwilightClaims-1.6.0.jar`. The build also produces `ta
 | Command | Permission | Description |
 | --- | --- | --- |
 | `/claim` | `twilight.claim.command.claim` | Create a claim around the player. |
+| `/claimsmanaged status\|list\|inspect\|reconcile` | `twilight.claim.managed.admin` | Inspect managed state and explicitly reconcile known durable links. |
 | `/claim info` | `twilight.claim.command.claim` | Show information about the current region. |
 | `/claim list [page]` | `twilight.claim.command.claim` | List owned claims, with 10 entries per page. |
 | `/claim points` | `twilight.claim.command.claimpoints` | Show total, used and free claim points. |
@@ -186,6 +187,7 @@ Placeholder values come from a snapshot refreshed on the main thread once per se
 | `visual` | Boundary materials, spacing, range and duration. |
 | `messages` | Player messages, list entries and confirmation buttons. |
 | `actionbar.duration-ticks` | Duration of repeated shovel actionbar messages. |
+| `managed` | Durable server ID, managed operation queue capacity and response timeout. |
 
 Message templates support placeholders such as `%id%`, `%owner%`, `%x%`, `%z%`, `%world%` and `%area%`, depending on the message. Use the bundled `config.yml` as the reference when customizing templates.
 
@@ -201,7 +203,7 @@ Install TwilightClaims into your local Maven repository with `mvn clean install`
 <dependency>
     <groupId>com.twilight</groupId>
     <artifactId>TwilightClaims</artifactId>
-    <version>1.6.0</version>
+    <version>1.7.0</version>
     <classifier>api</classifier>
     <scope>provided</scope>
 </dependency>
@@ -342,3 +344,11 @@ public void onClaimChange(ClaimPreChangeEvent event) {
 ```
 
 Mutations can throw `ClaimOperationException`; inspect `getReason()` for `NOT_FOUND`, `WORLD_UNAVAILABLE`, `INVALID_BOUNDS`, `CONFLICT`, `NOT_ENOUGH_POINTS`, `HAS_CHILDREN`, `SAVE_FAILED`, `INVALID_OWNER`, `INVALID_STATE` or `CANCELLED`. Invalid arguments and off-thread access use `IllegalArgumentException` or `IllegalStateException`. A cancelled or failed change does not emit a successful post-change event. WorldGuard save failures restore the previous region state.
+
+## Managed regions for other plugins
+
+TwilightClaims 1.7.0 adds the separate `ManagedClaimsApi` service without changing the personal API v1 interface. It provides external identities, complete revisioned state, atomic replacement of up to 50 members, independent area budgets, idempotent operation IDs, durable deletion tombstones, asynchronous confirmation, recovery and controller ACL leases. Custom boundary materials work with managed regions as well.
+
+Managed regions have no player owner and do not consume personal claim points. Personal commands, the shovel and API v1 mutations cannot change them. The controller applies authorized full snapshots and must verify/renew the exact ACL revision before members receive access. Controller shutdown, restart, expiry or loss of synchronization restricts managed access; normal WorldGuard denials always remain effective.
+
+See [the managed API reference and integration examples](API.md#managed-regions-for-external-controllers) for methods, statuses, controller registration, leases, configuration, durability and recovery. Back up the entire `plugins/TwilightClaims/managed` directory: managed WG cuboids are transient projections restored from that journal. Do not roll back to an older JAR while managed regions are active without a planned migration or a consistent backup. Global cross-server uniqueness and authoritative clan membership remain the controller’s responsibility.

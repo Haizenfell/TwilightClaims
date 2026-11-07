@@ -13,6 +13,7 @@ import com.twilight.claims.api.ClaimKey;
 import com.twilight.claims.api.ClaimOperationException;
 import com.twilight.claims.api.BoundaryStyle;
 import com.twilight.claims.config.ClaimsConfig;
+import com.twilight.claims.managed.ManagedRegions;
 import com.twilight.claims.wg.ClaimIdentity;
 import com.twilight.claims.wg.WGHook;
 import com.twilight.claims.visual.BoundaryStyles;
@@ -214,6 +215,9 @@ public final class ClaimOperations {
         World world = Bukkit.getWorld(key.worldId());
         RegionManager manager = manager(world);
         ProtectedRegion region = manager.getRegion(key.regionId());
+        if (ManagedRegions.isManagedId(key.regionId()) || ManagedRegions.isManaged(region)) {
+            throw failure(INVALID_STATE, "This claim is managed by an external controller; use ManagedClaimsApi");
+        }
         if (!wg.isClaim(region)) throw failure(NOT_FOUND, "Claim not found: " + key.regionId());
         return new WGHook.ClaimRef(world, region);
     }

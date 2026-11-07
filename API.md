@@ -1,6 +1,6 @@
 # TwilightClaims Developer API
 
-Complete reference for TwilightClaims **1.6.0**, public API version **1**.
+Complete reference for TwilightClaims **1.7.0**, personal API version **1** and managed API version **1**.
 
 The entry point is `com.twilight.claims.api.TwilightClaimsApi`. Obtain it from Bukkit's `ServicesManager`; use the public API rather than the plugin's internal managers or mutable WorldGuard regions.
 
@@ -18,6 +18,7 @@ The entry point is `com.twilight.claims.api.TwilightClaimsApi`. Obtain it from B
 - [Events](#events)
 - [Errors](#errors)
 - [Complete example plugin](#complete-example-plugin)
+- [Managed regions for external controllers](#managed-regions-for-external-controllers)
 
 ## Dependencies and connection
 
@@ -33,8 +34,8 @@ The build produces:
 
 | Artifact | Purpose |
 | --- | --- |
-| `TwilightClaims-1.6.0.jar` | The server plugin. Install this in the server's `plugins` directory. |
-| `TwilightClaims-1.6.0-api.jar` | Public API classes for compilation. Do not install this as a server plugin. |
+| `TwilightClaims-1.7.0.jar` | The server plugin. Install this in the server's `plugins` directory. |
+| `TwilightClaims-1.7.0-api.jar` | Public API classes for compilation. Do not install this as a server plugin. |
 
 The example below uses locally installed artifacts. It does not assume that TwilightClaims is published to a public Maven repository.
 
@@ -63,7 +64,7 @@ Add these repositories, dependencies and compiler settings to the consuming plug
     <dependency>
         <groupId>com.twilight</groupId>
         <artifactId>TwilightClaims</artifactId>
-        <version>1.6.0</version>
+        <version>1.7.0</version>
         <classifier>api</classifier>
         <scope>provided</scope>
     </dependency>
@@ -126,6 +127,8 @@ Resolve the service in your plugin's `onEnable()`. If integration is optional, u
 The service is unregistered when TwilightClaims shuts down. Calls through an old service reference then throw `IllegalStateException`. A consumer should release its reference on shutdown, not close or unregister the shared provider.
 
 ## Execution rules
+
+The sections before the managed API reference describe `TwilightClaimsApi`. Its global and spatial read methods can return managed region snapshots for inspection and boundary display. `isOwner` and `isTrusted` return false for managed regions, personal lists/points exclude them, and attempts to mutate them or use them as parents through API v1 fail with `INVALID_STATE`. A stored membership snapshot is never a substitute for managed ACL trust.
 
 ### Threading
 
@@ -295,7 +298,7 @@ The short constructor `new BoundaryStyle(corner, edge)` sets the selected and er
 
 | Signature | Behavior |
 | --- | --- |
-| `String getPluginVersion()` | Installed plugin version, currently `1.6.0`. |
+| `String getPluginVersion()` | Installed plugin version, currently `1.7.0`. |
 | `List<Claim> getClaims()` | All recognized claims across loaded worlds. |
 | `List<Claim> getClaims(World world)` | All recognized claims in the specified loaded WorldGuard world. |
 | `List<Claim> getClaims(UUID owner)` | Owned claims across loaded worlds, ordered numerically by personal number. |
@@ -753,3 +756,301 @@ permissions:
 ```
 
 Build with JDK 26, install the full TwilightClaims server plugin and this example plugin, then restart the server. The API-only JAR stays a compile-time dependency. `/exampleclaim` needs sufficient free claim points and unoccupied space; use the normal TwilightClaims tools and commands to inspect or edit the created claim afterward.
+
+## Managed regions for external controllers
+
+`com.twilight.claims.api.managed.ManagedClaimsApi` is a separate Bukkit service. The existing `TwilightClaimsApi` remains API v1; existing personal integrations do not need recompilation. New consumers must call `getApiVersion()` and inspect `getCapabilities()` on the actual provider. A compile-time constant cannot reliably detect the running provider version.
+
+Managed regions belong to an external identity, not a player or clan leader. They have no WorldGuard owner, use an exact UUID member ACL, and do not consume anyone's personal claim points. Personal commands, shovel edits and API v1 mutations cannot change them, create children inside them or assign them as parents. Creating a clan region does not convert existing personal regions.
+
+### Connection and controller registration
+
+Use the API classifier dependency and `depend: [TwilightClaims]` shown earlier. Do not shade or relocate the API or install its JAR as a server plugin.
+
+```java
+import com.twilight.claims.api.managed.ManagedClaimsApi;
+import com.twilight.claims.api.managed.ManagedControllerRegistration;
+
+ManagedClaimsApi managed = Bukkit.getServicesManager().load(ManagedClaimsApi.class);
+if (managed == null || managed.getApiVersion() != 1) {
+    throw new IllegalStateException("Managed Claims API v1 is required");
+}
+ManagedControllerRegistration controller = managed.registerController(
+        yourPlugin, "twilightclans", (context, action, desired) -> {
+            return yourVerifiedLocalPolicy.authorize(context, action, desired);
+        });
+```
+
+Register on the server thread. Authorization runs on the server thread and must use already verified local state; it must not perform SQL, Redis, network calls or blocking waits. A controller ID is a stable namespace such as `twilightclans`. The controller must form contexts and budgets from trusted server state, not forward unvalidated client input. Close the registration during controller shutdown. Plugin disable also revokes it.
+
+The remaining service methods return `CompletionStage` and accept calls from any thread; the provider schedules live Bukkit/WorldGuard work on the server thread. Never call `join()` or `get()` on the server thread. Completion callbacks do not promise a Bukkit-safe thread: schedule player messages and other game interactions back onto your plugin's server task.
+
+### Identities, versions and full state
+
+| Type | Fields and meaning |
+| --- | --- |
+| `ManagedClaimIdentity` | `String controllerId`, `UUID externalId`, `UUID instanceId`, `String serverId`, `UUID worldId`. `externalId` is the permanent clan UUID; `instanceId` identifies one lifetime of its region. `regionId()` returns the associated WG ID. |
+| `ManagedOperationContext` | `ManagedClaimIdentity identity`, `UUID operationId`, `long revision`, nullable `UUID initiator`. Revisions are positive and increase per instance. |
+| `ManagedClaimState` | `ClaimBounds bounds`, `long areaBudget`, `Set<UUID> members`, `Map<String,String> flags`, nullable `BoundaryStyle boundaryStyle`, `int priority`. Complete desired state, not a patch. Collections are copied. |
+| `ManagedClaimSnapshot` | `identity`, `ClaimKey key`, `long revision`, `ManagedLifecycle lifecycle`, nullable `ManagedClaimState state` for deletion. Immutable revision snapshot; the result status determines whether it is confirmed. |
+| `ManagedResult` | `ManagedStatus status`, nullable `snapshot`, nullable `operationId`, `String message`; `isSuccess()` accepts only `APPLIED`, `DELETED`, `REPLAYED`. |
+| `ManagedClaimPage` | `status`, immutable `claims`, `nextOffset`; bounded reconciliation results including tombstones, with `-1` indicating the end. |
+| `ManagedDiagnostics` | `ready`, `queuedOperations`, `pendingRecovery`, `activeClaims`, `tombstones`, `receipts`, `controllers`, `trustedClaims`, `lastError`, immutable world-availability map. |
+
+`controllerId` accepts lowercase letters, digits, `_`, `.`, `-`, starts with a letter/digit and is at most 64 characters. `serverId` is nonblank and at most 128 characters. A state accepts at most 50 member UUIDs and 128 explicit flags; flag names are at most 128 characters and input values at most 8192. Budget is nonnegative; actual creation requires a positive budget and an area within it.
+
+Flag values are WorldGuard command-input strings, for example `Map.of("pvp", "deny")`. Missing keys clear old explicit flags because this is a complete replacement. The provider validates registered flags and parses/round-trips them before applying. Boundary materials use the dedicated `boundaryStyle` field; internal metadata/style flags cannot be passed through the flags map. A null style selects the configured default.
+
+Area is inclusive X/Z: `(maxX-minX+1)*(maxZ-minZ+1)`. Y does not cost area. The provider enforces the passed budget independently of personal points, and still checks the minimum size, build height, world border, intersections and parent/child restrictions. A 5000-block budget is a maximum, not a request to invent an exactly 5000-block square.
+
+A leader change needs no region ownership transfer. Update only the desired ACL if membership policy changes. The instance UUID is never reused after deletion, even for the same clan. Persist at least server ID, world UUID, instance UUID and WG region ID in the controlling plugin.
+
+### Service methods
+
+| Method | Contract |
+| --- | --- |
+| `int getApiVersion()` | Actual runtime managed API version. |
+| `Set<String> getCapabilities()` | Immutable provider capability set. |
+| `String getServerId()` | Durable local server identity after diagnostics report ready; use it to route requests. |
+| `ManagedControllerRegistration registerController(Plugin, String, ManagedController)` | Register one live controller namespace and authorization callback. Server thread only. |
+| `CompletionStage<ManagedResult> ensureManagedClaim(ManagedOperationContext, ManagedClaimState)` | Idempotently create/recover the externally identified instance with full initial ACL, flags and budget. |
+| `CompletionStage<ManagedResult> applyManagedState(ManagedOperationContext, ManagedClaimState)` | Apply a newer complete desired state; replaces the whole ACL atomically. |
+| `CompletionStage<ManagedResult> deleteManagedClaim(ManagedOperationContext)` | Durably delete this exact instance and retain terminal protection against resurrection. |
+| `CompletionStage<ManagedResult> lookupManagedClaim(ManagedClaimIdentity)` | Indexed local lookup distinguishing absence from unavailable world/provider and wrong server. |
+| `CompletionStage<ManagedResult> getOperationResult(UUID)` | Find an earlier operation after timeout or restart; does not create a new operation. |
+| `CompletionStage<ManagedClaimPage> listManagedClaims(String, int offset, int limit)` | Controller-specific enumeration for reconciliation; includes terminal instances, `offset >= 0`, `limit` 1..100, `nextOffset == -1` at the end. It does not load missing worlds. |
+| `CompletionStage<ManagedDiagnostics> getDiagnostics()` | Queue/recovery/controller/ACL/world health. |
+| `CompletionStage<ManagedResult> reconcileManagedClaim(ManagedClaimIdentity)` | Explicit reconciliation of one durable external link and its projection; never guesses ownership from a name. |
+
+The same operation UUID with exactly the same context/action/state is a safe replay; changing any content under that operation UUID yields `PAYLOAD_CONFLICT`. Member order and flag-map order do not affect the canonical payload. At the same revision, equivalent full state is a replay; different state is a conflict. Lower revisions are rejected, and revision gaps are allowed. A delayed snapshot of revision 21 cannot re-add a member removed in revision 22.
+
+Only one active local instance is allowed per controller/external UUID. After terminal deletion, a new instance can be created. Repeating deletion of the old instance does not remove the replacement. Clans must enforce network-wide reservation in its authoritative database; local checks on independent Paper servers cannot implement global uniqueness.
+
+### Explicit results and retries
+
+| Status | Meaning / caller action |
+| --- | --- |
+| `APPLIED` | Desired state durably confirmed. |
+| `DELETED` | Exact instance deletion durably confirmed. |
+| `REPLAYED` | Safe replay of an already confirmed result. Receipts can describe historical revisions; use lookup for the current state. |
+| `FOUND` | Lookup found the instance and confirmed snapshot. |
+| `NOT_FOUND` | Available local storage/world confirms absence; an unknown operation ID has no receipt. |
+| `PENDING` | Accepted work has not reached durable confirmation. Poll the same operation. |
+| `STALE_REVISION` | Older revision rejected with no state change. |
+| `PAYLOAD_CONFLICT` | Reused operation/revision contains incompatible state. |
+| `INSTANCE_CONFLICT` | Different active instance or incompatible external link already exists. |
+| `TOMBSTONED` | This lifetime is terminal; it cannot be recreated or updated. |
+| `INVALID_BOUNDS` | Size, height, world border or geometry invalid. |
+| `CONFLICT` | Intersects another protected region or inheritance restriction. |
+| `BUDGET_EXCEEDED` | Inclusive area exceeds the controller-authorized limit. |
+| `CONTROLLER_DENIED` | Controller absent, disabled or authorization rejected. |
+| `CANCELLED` | Pre-change event cancelled the operation. |
+| `SAVE_FAILED` | Durable write failed before success was confirmed. |
+| `UNCERTAIN` | Result requires reconciliation/polling; do not assume cancellation or start a different operation. |
+| `WORLD_UNAVAILABLE` | World is unloaded or WG manager unavailable. Deletion is not confirmed. |
+| `PROVIDER_UNAVAILABLE` | Provider is starting, stopped or failed to initialize. |
+| `WRONG_SERVER` | Identity belongs to another server; route to that server. |
+| `QUEUE_FULL` | Bounded provider queue is full; retry with backoff and the same operation UUID. |
+| `DRIFT_DETECTED` | WG projection differs from durable state or an unknown object occupies its identity. Investigate/reconcile explicitly. |
+
+A response timeout does not cancel a durable intention. Query `getOperationResult(operationId)` and/or `lookupManagedClaim(identity)` and reuse the original operation UUID. Never interpret an empty personal `getClaim()` result as evidence of managed deletion.
+
+### Durable storage and restoration
+
+Managed state is authoritative in the plugin's local managed journal. WG cuboids are transient projections: they participate in WorldGuard protection and spatial lookup but WG does not write them to its region database. This prevents delayed WG autosaves from overwriting newer managed state and avoids sharing live WG objects with an I/O worker.
+
+The provider reserves a projection on the server thread while access is gated, writes a recoverable prepared intention and committed receipt through one bounded worker, and only then publishes confirmed success. Journal writes use checksums, file fsync, atomic replacement and directory fsync. Live region inspection and mutations remain on the server thread. Existing personal API saves keep their prior synchronous contract. The managed service never calls `RegionManager.saveChanges()` as its durability mechanism. The journal is part of the server data and must be backed up together with the plugin configuration; managed regions are not present in WorldGuard’s persistent region file.
+
+Startup loads the journal in the background. Recovery projects confirmed state when its world is available and resumes durable incomplete intentions. A world load triggers recovery without requiring any former member to join. Unknown/corrupt journal data causes a safe unavailable state, not an empty database. Direct WG edits are outside normal API guarantees and are detected by projection comparison; unknown objects are not deleted merely because a name matches. `reconcileManagedClaim` is a privileged server integration/recovery operation: it restores known durable state while clearing ACL trust, does not accept new state, and will not overwrite an unrecognized WG object. Present it to administrators only, never as a player-controlled request.
+
+Operation receipts and terminal instance identifiers have no arbitrary automatic TTL. Preserve them for the entire possible delivery lifetime of Clans jobs. The provider does not add Redis, MariaDB or a second clan economy. Clans owns global reservation, routing, durable outbox, membership authority and purchase validation.
+
+### ACL trust and controller failures
+
+A saved membership set is not itself proof that membership is current. While the journal is loading, if it cannot be validated, or if a loaded managed world's protection cannot be restored, sensitive actions are conservatively denied across worlds until protection is ready; a missing WG manager also fails closed in worlds with known managed instances. Worlds without managed state keep their normal behavior when WG regions are disabled there. Resolve the journal/provider failure rather than treating it as an empty region database. After startup, after state changes and after controller disconnection, managed access remains restricted until the controller confirms the exact applied revision against its authoritative membership state.
+
+```java
+controller.renewAcl(identity, confirmedRevision, 200L).thenAccept(accepted -> {
+    if (!accepted) {
+        yourPlugin.getLogger().warning("Managed ACL revalidation rejected");
+    }
+});
+```
+
+`renewAcl(identity, revision, leaseTicks)` returns `CompletionStage<Boolean>` and accepts 1..1200 ticks (up to 60 seconds); it only trusts an existing confirmed revision belonging to that registration. The expiry uses monotonic elapsed time. `invalidateAcl(identity)` explicitly revokes trust. `close()`, plugin disable, revision replacement and provider restart invalidate leases. Redis heartbeat alone is not a membership proof; renew only after establishing current ACL consistency. A bounded lease cannot guarantee instant worldwide revocation during a network partition.
+
+With a fresh trusted revision, the listener admits exact member UUIDs and permits actorless automation to proceed to normal WorldGuard checks. Without trust, both are restricted. The provider's listener only adds denials and never bypasses WG restrictions. It protects block changes, container opening/use, interactions, buckets, entities, hanging entities, vehicles, harvest/fertilization, item access and relevant automation/environmental effects. Lack of management permission and lack of ACL trust are separate controls. Setting a regional PvP flag to ALLOW is not an implementation of global clan friendly-fire rules.
+
+### Managed events
+
+Events are dispatched on the server thread and are separate from personal API events.
+
+| Event | Methods |
+| --- | --- |
+| `ManagedClaimPreChangeEvent` | `getContext()`, `getAction()`, nullable `getBefore()`, nullable `getDesiredState()` for deletion, `isCancelled()`, `setCancelled(boolean)`. Cancel before durable work. |
+| `ManagedClaimPersistedEvent` | `getContext()`, `getAction()`, `getResult()`, `isRecovery()`. Indicates confirmed durable success, including recoveries. |
+
+The context includes controller, external/instance identity, operation UUID, revision and optional initiator. Events are notifications, not the only recovery mechanism: restart may prevent their delivery. Recover from stored results and Clans' durable jobs instead.
+
+### Provider configuration
+
+```yaml
+managed:
+  server-id: ""
+  queue-capacity: 256
+  operation-timeout-seconds: 30
+```
+
+An empty `managed.server-id` generates a durable server UUID in `plugins/TwilightClaims/managed/server-id`. An explicit configured ID must match the journal once initialized. Keep it unique per server and stable across restarts. Queue capacity is clamped to 1..4096; operation timeout to 1..300 seconds. A running timeout yields `UNCERTAIN` and does not cancel disk work; a job expiring before execution yields `QUEUE_FULL`. Back off on saturation and reuse the same operation ID. No unbounded per-request disk workers are created.
+
+The managed service capability set is `managed-identities`, `revisioned-state`, `atomic-acl`, `durable-receipts`, `terminal-tombstones`, `async-durability`, `controller-acl-leases`, `indexed-lookup`, `reconciliation` and `persistent-boundary-styles`.
+
+### Administrative diagnostics
+
+The built-in administrative command requires `twilight.claim.managed.admin` (default: operator):
+
+| Command | Purpose |
+| --- | --- |
+| `/claimsmanaged status` | Read readiness, durable server ID, queue/recovery counts, controller/lease counts and last error. |
+| `/claimsmanaged list <controller> [offset]` | Enumerate 20 durable snapshots, including terminal instances, starting at the given offset. |
+| `/claimsmanaged inspect <controller> <externalUUID> <instanceUUID> <worldUUID>` | Inspect the exact external link on this server; reports availability/drift explicitly. |
+| `/claimsmanaged reconcile <controller> <externalUUID> <instanceUUID> <worldUUID>` | Explicitly restore a known durable projection, clearing ACL trust. Does not remove or overwrite unknown objects. |
+
+Reconciliation waits for in-flight managed work to finish and reports `PENDING` if busy. It restores the already recorded state, not a new player-submitted geometry or membership set. The controlling plugin must revalidate the ACL afterward.
+
+### Upgrade and rollback
+
+Stop the server and back up the entire TwilightClaims data folder and WorldGuard data before upgrading. Install the server JAR, keep the API classifier for compilation only, then update the controller integration. Keep the durable server identity stable and unique per server; do not copy an active managed journal to another server as a way of creating a new region.
+
+On rollback to a version without managed support, remove/disable the controller and explicitly migrate or retire managed regions first. Old versions do not understand the authoritative managed journal and cannot restore transient projections, so replacing the JAR alone does not preserve their protection. Restore a consistent backup when reverting an unsuccessful rollout. Personal regions are not automatically converted.
+
+
+### Complete managed controller example
+
+The class below is a small adapter for trusted server-side jobs. `submitVerifiedIntent` must be called only after the controlling plugin has validated membership, rights, budget and routing and durably stored the exact context/state in its own outbox. It is not a command endpoint and does not implement global reservation or purchase validation. The exact-operation authorization map is local and nonblocking; after a restart the controller reconstructs jobs from its authoritative store.
+
+Use the earlier Maven setup with the `1.7.0` API classifier. Place this class in `src/main/java/example/ManagedClaimsIntegrationPlugin.java`:
+
+```java
+package example;
+
+import com.twilight.claims.api.managed.ManagedAction;
+import com.twilight.claims.api.managed.ManagedClaimIdentity;
+import com.twilight.claims.api.managed.ManagedClaimState;
+import com.twilight.claims.api.managed.ManagedClaimsApi;
+import com.twilight.claims.api.managed.ManagedControllerRegistration;
+import com.twilight.claims.api.managed.ManagedOperationContext;
+import com.twilight.claims.api.managed.ManagedResult;
+import com.twilight.claims.api.managed.ManagedStatus;
+import org.bukkit.Bukkit;
+import org.bukkit.plugin.java.JavaPlugin;
+
+import java.util.Map;
+import java.util.Objects;
+import java.util.UUID;
+import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.CompletionStage;
+import java.util.concurrent.ConcurrentHashMap;
+
+public final class ManagedClaimsIntegrationPlugin extends JavaPlugin {
+    private final Map<UUID, ApprovedIntent> approved = new ConcurrentHashMap<>();
+    private ManagedClaimsApi managed;
+    private ManagedControllerRegistration registration;
+
+    private record ApprovedIntent(ManagedOperationContext context, ManagedAction action,
+                                  ManagedClaimState state) {}
+
+    @Override
+    public void onEnable() {
+        managed = Bukkit.getServicesManager().load(ManagedClaimsApi.class);
+        if (managed == null || managed.getApiVersion() != 1
+                || !managed.getCapabilities().contains("controller-acl-leases")) {
+            getLogger().severe("Compatible ManagedClaimsApi is required");
+            Bukkit.getPluginManager().disablePlugin(this);
+            return;
+        }
+        registration = managed.registerController(this, "twilightclans", (context, action, state) ->
+                new ApprovedIntent(context, action, state).equals(approved.get(context.operationId())));
+    }
+
+    public CompletionStage<ManagedResult> submitVerifiedIntent(ManagedOperationContext context,
+                                                              ManagedAction action,
+                                                              ManagedClaimState state) {
+        Objects.requireNonNull(context);
+        Objects.requireNonNull(action);
+        if (!context.identity().controllerId().equals("twilightclans")) {
+            throw new IllegalArgumentException("Wrong controller namespace");
+        }
+        if (action != ManagedAction.DELETE) Objects.requireNonNull(state);
+        if (action == ManagedAction.DELETE && state != null) {
+            throw new IllegalArgumentException("Deletion has no desired state");
+        }
+        ApprovedIntent intent = new ApprovedIntent(context, action, state);
+        ApprovedIntent previous = approved.putIfAbsent(context.operationId(), intent);
+        if (previous != null && !previous.equals(intent)) {
+            return CompletableFuture.completedFuture(new ManagedResult(
+                    ManagedStatus.PAYLOAD_CONFLICT, null, context.operationId(), "Local intent differs"));
+        }
+        return switch (action) {
+            case ENSURE -> managed.ensureManagedClaim(context, state);
+            case APPLY -> managed.applyManagedState(context, state);
+            case DELETE -> managed.deleteManagedClaim(context);
+        };
+    }
+
+    public CompletionStage<Boolean> confirmVerifiedAcl(ManagedClaimIdentity identity, long revision) {
+        return registration.renewAcl(identity, revision, 200L);
+    }
+
+    public CompletionStage<Boolean> markAclUntrusted(ManagedClaimIdentity identity) {
+        return registration.invalidateAcl(identity);
+    }
+
+    public void releaseCompletedIntent(UUID operationId) {
+        approved.remove(operationId);
+    }
+
+    @Override
+    public void onDisable() {
+        if (registration != null) registration.close();
+        approved.clear();
+        registration = null;
+        managed = null;
+    }
+}
+```
+
+Matching `src/main/resources/plugin.yml`:
+
+```yaml
+name: ManagedClaimsIntegrationExample
+version: '1.0.0'
+main: example.ManagedClaimsIntegrationPlugin
+api-version: '26.3'
+depend: [TwilightClaims]
+```
+
+A trusted Clans job forms a complete state, for example:
+
+```java
+ManagedClaimState desired = new ManagedClaimState(
+        ClaimBounds.fullHeight(world, 100, 100, 149, 199),
+        5000L,
+        verifiedMemberUuids,
+        Map.of("pvp", "deny"),
+        new BoundaryStyle(Material.EMERALD_BLOCK, Material.GOLD_BLOCK),
+        0);
+
+ManagedOperationContext context = new ManagedOperationContext(
+        durableIdentity, durableOperationUuid, durableRevision, initiatingPlayerUuid);
+
+adapter.submitVerifiedIntent(context, ManagedAction.ENSURE, desired).thenAcceptAsync(result -> {
+    if (result.isSuccess()) {
+        saveAcknowledgementToYourDurableOutbox(result);
+    } else {
+        scheduleRetryOrReconciliationAccordingToStatus(result);
+    }
+});
+```
+
+The final fragment uses integration-specific persistence/retry functions rather than implementing MariaDB or Redis. Its completion work runs asynchronously; any Bukkit actions must be scheduled back to the server thread. The bounds are `50 × 100`, exactly 5000 inclusive blocks. Keep `durableIdentity.instanceId()` and `durableOperationUuid` stable when retrying; create new ones only for a genuinely new instance or new job. Use `APPLY` with a higher revision for resize/ACL/budget/flags changes, and `DELETE` with a higher revision and no state to retire the instance. Do not call `confirmVerifiedAcl` merely because a write succeeded: first verify that its exact revision still represents the current authoritative membership state. Release the local approved intent only after its durable lifecycle is resolved; cap and reconcile the controller's own outstanding jobs.

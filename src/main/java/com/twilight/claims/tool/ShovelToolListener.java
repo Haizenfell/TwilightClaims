@@ -9,6 +9,7 @@ import com.twilight.claims.api.ClaimOperationException;
 import com.twilight.claims.config.ClaimsConfig;
 import com.twilight.claims.config.Messages;
 import com.twilight.claims.manager.ClaimManager;
+import com.twilight.claims.managed.ManagedRegions;
 import com.twilight.claims.visual.RegionVisualizer;
 import com.twilight.claims.wg.ClaimIdentity;
 import com.twilight.claims.wg.WGHook;
@@ -92,7 +93,7 @@ public class ShovelToolListener implements Listener {
 
         if (!wg.isOwner(player, region)) {
             visualizer.showError(player, region);
-            sendAction(player, msg.msg("not_owner"));
+            sendAction(player, msg.msg(ManagedRegions.isManaged(region) ? "managed_region_locked" : "not_owner"));
             event.setCancelled(true);
             return;
         }
@@ -352,7 +353,7 @@ public class ShovelToolListener implements Listener {
             return false;
         }
         if (!wg.isOwner(player, region)) {
-            sendAction(player, msg.msg("not_owner"));
+            sendAction(player, msg.msg(ManagedRegions.isManaged(region) ? "managed_region_locked" : "not_owner"));
             return false;
         }
         return true;

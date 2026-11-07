@@ -124,6 +124,7 @@ messages:
   region_too_close: "&c[⚐] Cannot modify claim! Too close to %owner%&c's claim!"
   no_region: "&c[⚐] There is no claim here"
   not_owner: "&c[⚐] You are not the owner of this claim"
+  managed_region_locked: "&c[⚐] This region is managed by another plugin. Use its region controls."
   click_inside_region: "&9[⚐] &7Type &9/claim unclaim &7to delete this claim"
 
   region_create: "&9[⚐] &e%owner% &7/ &a%id% &7created with size &e%area% &7blocks"
@@ -176,3 +177,8 @@ messages:
 
 actionbar:
   duration-ticks: 100
+
+managed:
+  server-id: ''
+  queue-capacity: 256
+  operation-timeout-seconds: 30

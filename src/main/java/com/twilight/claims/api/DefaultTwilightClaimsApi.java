@@ -12,6 +12,7 @@ import com.twilight.claims.config.ClaimsConfig;
 import com.twilight.claims.config.Messages;
 import com.twilight.claims.manager.ClaimManager;
 import com.twilight.claims.manager.ClaimOperations;
+import com.twilight.claims.managed.ManagedRegions;
 import com.twilight.claims.visual.BoundaryStyles;
 import com.twilight.claims.visual.RegionVisualizer;
 import com.twilight.claims.wg.ClaimIdentity;
@@ -120,10 +121,12 @@ public final class DefaultTwilightClaimsApi implements TwilightClaimsApi, AutoCl
     }
 
     @Override public boolean isOwner(ClaimKey key, UUID player) {
+        if (ManagedRegions.isManagedId(Objects.requireNonNull(key, "key").regionId())) { checkThread(); return false; }
         return getClaim(key).map(claim -> claim.isOwner(player)).orElse(false);
     }
 
     @Override public boolean isTrusted(ClaimKey key, UUID player) {
+        if (ManagedRegions.isManagedId(Objects.requireNonNull(key, "key").regionId())) { checkThread(); return false; }
         return getClaim(key).map(claim -> claim.isOwner(player) || claim.isMember(player)).orElse(false);
     }
 
@@ -306,13 +309,16 @@ public final class DefaultTwilightClaimsApi implements TwilightClaimsApi, AutoCl
     @Override public boolean isInspector(ItemStack item) { checkThread(); return config.isStick(item); }
     @Override public void showClaimList(Player player, int page) { checkThread(); list.execute(Objects.requireNonNull(player, "player"), page); }
     @Override public void requestDeletion(Player player, ClaimKey key) {
-        checkThread(); WGHook.ClaimRef ref = require(key);
+        checkThread(); requirePersonal(key); WGHook.ClaimRef ref = require(key);
         deletions.request(player, deletions.createRequest(Objects.requireNonNull(player, "player"), ref));
     }
 
     private Claim change(ClaimChangeType type, ClaimKey key, Map<String, Object> changes, Supplier<WGHook.ClaimRef> action) {
         checkThread();
         if (changing) throw new IllegalStateException("Do not mutate claims inside a ClaimPreChangeEvent listener");
+        if (key != null) requirePersonal(key);
+        Object parent = changes.get("parent");
+        if (parent instanceof ClaimKey parentKey) requirePersonal(parentKey);
         Claim before = key == null ? null : snapshot(require(key));
         Map<Flag<?>, Object> previousFlags = key == null ? Map.of() : getFlags(key);
         Claim after;
@@ -356,6 +362,15 @@ public final class DefaultTwilightClaimsApi implements TwilightClaimsApi, AutoCl
         ProtectedRegion region = wg.getClaim(key.worldId(), key.regionId());
         if (region == null) throw new ClaimOperationException(ClaimOperationException.Reason.NOT_FOUND, "Claim does not exist");
         return new WGHook.ClaimRef(world, region);
+    }
+
+    private void requirePersonal(ClaimKey key) {
+        Objects.requireNonNull(key, "key");
+        if (ManagedRegions.isManagedId(key.regionId())
+                || ManagedRegions.isManaged(wg.getClaim(key.worldId(), key.regionId()))) {
+            throw new ClaimOperationException(ClaimOperationException.Reason.INVALID_STATE,
+                    "This claim is managed by an external controller; use ManagedClaimsApi");
+        }
     }
 
     private void requireWorld(World world) {

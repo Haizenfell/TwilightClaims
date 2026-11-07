@@ -4,6 +4,7 @@ import com.sk89q.worldedit.math.BlockVector3;
 import com.sk89q.worldguard.protection.flags.Flag;
 import com.sk89q.worldguard.protection.regions.ProtectedRegion;
 import com.twilight.claims.config.Messages;
+import com.twilight.claims.managed.ManagedRegions;
 import com.twilight.claims.visual.RegionVisualizer;
 import com.twilight.claims.wg.WGHook;
 import net.kyori.adventure.text.Component;
@@ -56,7 +57,7 @@ public final class ClaimDeletionService implements Listener, AutoCloseable {
             return;
         }
         if (!wg.isOwner(player, region)) {
-            messages.send(player, "not_owner", text -> text);
+            messages.send(player, ManagedRegions.isManaged(region) ? "managed_region_locked" : "not_owner", text -> text);
             return;
         }
         request(player, createRequest(player, new WGHook.ClaimRef(player.getWorld(), region)));
@@ -144,7 +145,7 @@ public final class ClaimDeletionService implements Listener, AutoCloseable {
             return null;
         }
         if (!wg.isOwner(player, current)) {
-            messages.send(player, "not_owner", text -> text);
+            messages.send(player, ManagedRegions.isManaged(current) ? "managed_region_locked" : "not_owner", text -> text);
             return null;
         }
         return new WGHook.ClaimRef(world, current);

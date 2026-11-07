@@ -17,8 +17,13 @@ commands:
     description: Remove a player from the current claim members.
   trustlist:
     description: Show trusted players for a claim.
+  claimsmanaged:
+    description: Inspect and reconcile externally managed claims.
+    permission: twilight.claim.managed.admin
 
 permissions:
+  twilight.claim.managed.admin:
+    default: op
   twilight.claim.command.claim:
     default: op
   twilight.claim.command.claimpoints:

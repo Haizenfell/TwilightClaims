@@ -11,6 +11,7 @@ import com.twilight.claims.TwilightClaims;
 import com.twilight.claims.api.ClaimBounds;
 import com.twilight.claims.api.ClaimKey;
 import com.twilight.claims.api.ClaimOperationException;
+import com.twilight.claims.managed.ManagedRegions;
 import org.bukkit.Bukkit;
 import org.bukkit.Location;
 import org.bukkit.World;
@@ -45,7 +46,8 @@ public class WGHook {
     }
 
     public boolean isClaim(ProtectedRegion region) {
-        return region instanceof ProtectedCuboidRegion && ClaimIdentity.isClaimId(region.getId());
+        return region instanceof ProtectedCuboidRegion
+                && (ClaimIdentity.isClaimId(region.getId()) || ManagedRegions.isManaged(region));
     }
 
     public String getDisplayName(ProtectedRegion region) {
@@ -59,7 +61,7 @@ public class WGHook {
     }
 
     public boolean isOwner(UUID owner, ProtectedRegion region) {
-        return isClaim(region) && region.getOwners().contains(owner);
+        return isClaim(region) && !ManagedRegions.isManaged(region) && region.getOwners().contains(owner);
     }
 
     public ProtectedRegion getRegionAt(Location location) {
