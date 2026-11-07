@@ -39,6 +39,8 @@ import org.bukkit.event.entity.EntityExplodeEvent;
 import org.bukkit.event.entity.EntityInteractEvent;
 import org.bukkit.event.entity.EntityPickupItemEvent;
 import org.bukkit.event.entity.EntityPlaceEvent;
+import org.bukkit.event.entity.PotionSplashEvent;
+import org.bukkit.event.entity.AreaEffectCloudApplyEvent;
 import org.bukkit.event.hanging.HangingBreakByEntityEvent;
 import org.bukkit.event.hanging.HangingBreakEvent;
 import org.bukkit.event.hanging.HangingPlaceEvent;
@@ -65,6 +67,7 @@ import org.bukkit.event.vehicle.VehicleDamageEvent;
 import org.bukkit.event.vehicle.VehicleDestroyEvent;
 import org.bukkit.event.vehicle.VehicleEnterEvent;
 import org.bukkit.event.world.StructureGrowEvent;
+import org.bukkit.projectiles.ProjectileSource;
 
 import java.util.Objects;
 import java.util.UUID;
@@ -127,13 +130,19 @@ public final class ManagedAccessListener implements Listener {
 
     private static UUID actor(Entity entity) {
         if (entity instanceof Player player) return player.getUniqueId();
-        if (entity instanceof Projectile projectile && projectile.getShooter() instanceof Entity shooter) {
-            return actor(shooter);
+        if (entity instanceof Projectile projectile) {
+            ProjectileSource source = projectile.getShooter();
+            return source instanceof Entity shooter ? actor(shooter)
+                    : source == null ? projectile.getOwnerUniqueId() : null;
         }
         if (entity instanceof Tameable tameable && tameable.getOwner() != null) {
             return tameable.getOwner().getUniqueId();
         }
         return null;
+    }
+
+    private static UUID potionActor(ProjectileSource source, UUID ownerId) {
+        return source instanceof Entity entity ? actor(entity) : source == null ? ownerId : null;
     }
 
     @EventHandler(priority = EventPriority.HIGHEST, ignoreCancelled = true)
@@ -230,6 +239,20 @@ public final class ManagedAccessListener implements Listener {
     @EventHandler(priority = EventPriority.HIGHEST, ignoreCancelled = true)
     public void onEntityDamage(EntityDamageByEntityEvent event) {
         if (isDenied(event.getEntity().getLocation(), actor(event.getDamager()))) event.setCancelled(true);
+    }
+
+    @EventHandler(priority = EventPriority.HIGHEST, ignoreCancelled = true)
+    public void onPotionSplash(PotionSplashEvent event) {
+        UUID actor = potionActor(event.getPotion().getShooter(), event.getPotion().getOwnerUniqueId());
+        for (var entity : event.getAffectedEntities()) {
+            if (isDenied(entity.getLocation(), actor)) event.setIntensity(entity, 0.0);
+        }
+    }
+
+    @EventHandler(priority = EventPriority.HIGHEST, ignoreCancelled = true)
+    public void onAreaEffectCloud(AreaEffectCloudApplyEvent event) {
+        UUID actor = potionActor(event.getEntity().getSource(), event.getEntity().getOwnerUniqueId());
+        event.getAffectedEntities().removeIf(entity -> isDenied(entity.getLocation(), actor));
     }
 
     @EventHandler(priority = EventPriority.HIGHEST, ignoreCancelled = true)

@@ -23,7 +23,7 @@ Set `JAVA_HOME` to a JDK 26 installation and run:
 mvn clean package
 ```
 
-The plugin JAR is `target/TwilightClaims-1.7.0.jar`. The build also produces `target/TwilightClaims-1.7.0-api.jar` for other plugin developers.
+The plugin JAR is `target/TwilightClaims-1.7.1.jar`. The build also produces `target/TwilightClaims-1.7.1-api.jar` for other plugin developers.
 
 1. Install WorldEdit and WorldGuard on the server.
 2. Install PlaceholderAPI if you need purchased points or the plugin's placeholders.
@@ -203,7 +203,7 @@ Install TwilightClaims into your local Maven repository with `mvn clean install`
 <dependency>
     <groupId>com.twilight</groupId>
     <artifactId>TwilightClaims</artifactId>
-    <version>1.7.0</version>
+    <version>1.7.1</version>
     <classifier>api</classifier>
     <scope>provided</scope>
 </dependency>
@@ -347,8 +347,13 @@ Mutations can throw `ClaimOperationException`; inspect `getReason()` for `NOT_FO
 
 ## Managed regions for other plugins
 
-TwilightClaims 1.7.0 adds the separate `ManagedClaimsApi` service without changing the personal API v1 interface. It provides external identities, complete revisioned state, atomic replacement of up to 50 members, independent area budgets, idempotent operation IDs, durable deletion tombstones, asynchronous confirmation, recovery and controller ACL leases. Custom boundary materials work with managed regions as well.
+TwilightClaims 1.7.1 adds the separate `ManagedClaimsApi` service without changing the personal API v1 interface. It provides external identities, complete revisioned state, atomic replacement of up to 50 members, independent area budgets, idempotent operation IDs, durable deletion tombstones, asynchronous confirmation, recovery and controller ACL leases. Custom boundary materials work with managed regions as well.
 
-Managed regions have no player owner and do not consume personal claim points. Personal commands, the shovel and API v1 mutations cannot change them. The controller applies authorized full snapshots and must verify/renew the exact ACL revision before members receive access. Controller shutdown, restart, expiry or loss of synchronization restricts managed access; normal WorldGuard denials always remain effective.
+Managed regions have no player owner and do not consume personal claim points. Personal commands, the shovel and API v1 mutations cannot change them. The controller applies authorized full snapshots and must verify/renew the exact ACL revision before members receive access. Controller shutdown, restart, expiry or loss of synchronization restricts managed access; normal WorldGuard denials always remain effective. Per-target splash and lingering-potion filtering also covers non-damaging effects across a managed boundary and clouds that survive ACL revocation.
 
 See [the managed API reference and integration examples](API.md#managed-regions-for-external-controllers) for methods, statuses, controller registration, leases, configuration, durability and recovery. Back up the entire `plugins/TwilightClaims/managed` directory: managed WG cuboids are transient projections restored from that journal. Do not roll back to an older JAR while managed regions are active without a planned migration or a consistent backup. Global cross-server uniqueness and authoritative clan membership remain the controller’s responsibility.
+
+
+Version 1.7.1 adds indexed offset/cursor reconciliation pages with bounded `O(log N + limit)` preparation and a controller generation for detecting changes during a pass. The personal and managed runtime API versions remain 1; new interface methods have compatibility defaults and are advertised through capabilities.
+
+Controllers can explicitly retire operation receipts only after durably closing delivery of the corresponding revision range in their own outbox system. Retirement preserves current states, tombstones and exact UUID replay protection while reclaiming retired full snapshots. `compactJournal()` publishes a durable checkpoint on the storage worker. There is no TTL: unretired receipts remain, and the disk archive still grows by 16 bytes per retired UUID plus metadata. Migration from the 1.7.0 journal is automatic; rollback to 1.7.0 requires a consistent pre-upgrade backup because it cannot read the new checkpoint/archive format. See [retirement and compaction](API.md#receipt-retirement-and-journal-compaction) and [reconciliation semantics](API.md#indexed-reconciliation-and-concurrent-changes) before using these capabilities.

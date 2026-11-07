@@ -33,8 +33,10 @@ public final class DefaultManagedClaimsApi implements ManagedClaimsApi, Listener
         thread.setDaemon(true);
         return thread;
     });
-    private final Map<UUID, ManagedJournal.Entry> receipts = new HashMap<>();
+    private final Map<UUID, ManagedJournal.Entry> receipts = new ConcurrentHashMap<>();
+    private final Map<UUID, ManagedJournal.Retirement> retirements = new HashMap<>();
     private final Map<UUID, ManagedJournal.Entry> current = new HashMap<>();
+    private ManagedClaimIndex claimIndex = new ManagedClaimIndex();
     private final Map<UUID, ManagedJournal.Entry> pending = new HashMap<>();
     private final Map<String, UUID> external = new HashMap<>();
     private final Map<String, Registration> controllers = new HashMap<>();
@@ -44,6 +46,7 @@ public final class DefaultManagedClaimsApi implements ManagedClaimsApi, Listener
     private final Set<UUID> unprotected = new HashSet<>();
     private final Set<CompletableFuture<?>> waiting = ConcurrentHashMap.newKeySet();
     private final AtomicInteger scheduled = new AtomicInteger();
+    private final AtomicInteger journalQueries = new AtomicInteger();
     private final Deque<Job> queue = new ArrayDeque<>();
     private final int capacity;
     private final long timeoutNanos;
@@ -54,6 +57,9 @@ public final class DefaultManagedClaimsApi implements ManagedClaimsApi, Listener
     private Job running;
     private boolean recovering;
     private boolean pumping;
+    private boolean journalMaintenance;
+    private long maintenanceStarted;
+    private CompletableFuture<ManagedResult> maintenanceFuture;
     private int maintenanceCounter;
 
     private record Lease(long revision, long expiresAt) {}
@@ -63,6 +69,7 @@ public final class DefaultManagedClaimsApi implements ManagedClaimsApi, Listener
         final ManagedClaimState state;
         final CompletableFuture<ManagedResult> future;
         final long submitted = System.nanoTime();
+        boolean archiveChecked;
         Job(ManagedOperationContext context, ManagedAction action, ManagedClaimState state,
             CompletableFuture<ManagedResult> future) {
             this.context = context; this.action = action; this.state = state; this.future = future;
@@ -80,7 +87,13 @@ public final class DefaultManagedClaimsApi implements ManagedClaimsApi, Listener
         io.execute(() -> {
             try {
                 var loaded = journal.load(configuredServerId);
-                onMain(() -> initialize(loaded));
+                Map<UUID, ManagedJournal.Entry> latest = new HashMap<>();
+                for (var entry : loaded.entries()) {
+                    if (entry.confirmed()) latest.put(entry.context().identity().instanceId(), entry);
+                }
+                ManagedClaimIndex loadedIndex = new ManagedClaimIndex();
+                for (var entry : latest.values()) loadedIndex.put(entry.snapshot());
+                onMain(() -> { claimIndex = loadedIndex; initialize(loaded); });
             } catch (Exception error) {
                 onMain(() -> fail("Cannot load managed journal", error));
             }
@@ -92,7 +105,8 @@ public final class DefaultManagedClaimsApi implements ManagedClaimsApi, Listener
     private void initialize(ManagedJournal.Loaded loaded) {
         serverId = loaded.serverId();
         try {
-            var entries = loaded.entries().stream().sorted(Comparator.comparingLong(e -> e.context().revision())).toList();
+            retirements.putAll(loaded.retirements());
+            var entries = loaded.entries();
             for (var entry : entries) {
                 var id = entry.context().identity();
                 var previous = current.get(id.instanceId());
@@ -101,7 +115,9 @@ public final class DefaultManagedClaimsApi implements ManagedClaimsApi, Listener
                         || previous.context().revision() == entry.context().revision()
                         && (!Objects.equals(previous.state(), entry.state()) || previous.action() == ManagedAction.DELETE != (entry.action() == ManagedAction.DELETE))))
                     throw new IllegalStateException("Conflicting durable managed revisions");
-                receipts.put(entry.context().operationId(), entry);
+                var retirement = retirements.get(id.instanceId());
+                if (retirement == null || entry.context().revision() > retirement.throughRevision())
+                    receipts.put(entry.context().operationId(), entry);
                 if (entry.confirmed()) current.put(id.instanceId(), entry);
                 else pending.merge(id.instanceId(), entry, (a, b) -> a.context().revision() > b.context().revision() ? a : b);
             }
@@ -128,7 +144,8 @@ public final class DefaultManagedClaimsApi implements ManagedClaimsApi, Listener
     @Override public int getApiVersion() { return 1; }
     @Override public Set<String> getCapabilities() {
         return Set.of("managed-identities", "revisioned-state", "atomic-acl", "durable-receipts", "terminal-tombstones",
-                "async-durability", "controller-acl-leases", "indexed-lookup", "reconciliation", "persistent-boundary-styles");
+                "async-durability", "controller-acl-leases", "indexed-lookup", "reconciliation", "persistent-boundary-styles",
+                "receipt-retirement", "journal-compaction", "indexed-cursor-pagination");
     }
     @Override public String getServerId() { return serverId; }
     public boolean isProtectionReady() { return active && ready && unprotected.isEmpty(); }
@@ -177,6 +194,11 @@ public final class DefaultManagedClaimsApi implements ManagedClaimsApi, Listener
                 if (!usable() || !id.equals(identity.controllerId())) return false;
                 leases.remove(identity.instanceId()); return true;
             }, false);
+        }
+        @Override public CompletionStage<ManagedResult> retireOperations(ManagedClaimIdentity identity, long throughRevision) {
+            Objects.requireNonNull(identity);
+            if (throughRevision < 1) throw new IllegalArgumentException("Retirement revision must be positive");
+            return maintainJournal(this, identity, throughRevision);
         }
         @Override public void close() {
             open = false;
@@ -232,10 +254,10 @@ public final class DefaultManagedClaimsApi implements ManagedClaimsApi, Listener
     }
 
     private void pump() {
-        if (!active || running != null || recovering || !ready || pumping) return;
+        if (!active || running != null || recovering || journalMaintenance || !ready || pumping) return;
         pumping = true;
         try {
-            while (active && ready && running == null && !recovering && !queue.isEmpty()) {
+            while (active && ready && running == null && !recovering && !journalMaintenance && !queue.isEmpty()) {
                 Job job = queue.removeFirst();
                 running = job;
                 try { begin(job); }
@@ -248,6 +270,30 @@ public final class DefaultManagedClaimsApi implements ManagedClaimsApi, Listener
         var c = job.context;
         var id = c.identity();
         if (!local(id)) { finish(job, result(WRONG_SERVER, null, c.operationId(), "Request targets another server")); return; }
+        var retired = retirements.get(id.instanceId());
+        if (retired != null && retired.identity().equals(id) && c.revision() <= retired.throughRevision()) {
+            finish(job, result(RETIRED, null, c.operationId(), "Revision is outside the agreed delivery lifetime")); return;
+        }
+        if (!job.archiveChecked) {
+            io.execute(() -> {
+                try {
+                    boolean archived = journal.isRetiredOperation(c.operationId());
+                    onMain(() -> {
+                        if (archived) finish(job, result(RETIRED, null, c.operationId(), "Operation UUID is permanently retired"));
+                        else {
+                            job.archiveChecked = true;
+                            try { begin(job); } catch (Exception error) { failOperation(job, error); }
+                        }
+                    });
+                } catch (Exception error) {
+                    onMain(() -> {
+                        fail("Cannot validate retired operation archive", error);
+                        finish(job, result(PROVIDER_UNAVAILABLE, null, c.operationId(), lastError));
+                    });
+                }
+            });
+            return;
+        }
         String fingerprint = ManagedJournal.fingerprint(c, job.action, job.state);
         var receipt = receipts.get(c.operationId());
         if (receipt != null) {
@@ -385,8 +431,10 @@ public final class DefaultManagedClaimsApi implements ManagedClaimsApi, Listener
                 journal.save(receipt);
                 onMain(() -> {
                     receipts.put(job.context.operationId(), receipt);
-                    if (job.context.revision() > previous.context().revision())
+                    if (job.context.revision() > previous.context().revision()) {
                         current.put(job.context.identity().instanceId(), receipt);
+                        claimIndex.put(receipt.snapshot());
+                    }
                     finish(job, result(REPLAYED, receipt.snapshot(), job.context.operationId(), "Equivalent state; durable replay receipt"));
                 });
             } catch (Exception error) {
@@ -398,6 +446,7 @@ public final class DefaultManagedClaimsApi implements ManagedClaimsApi, Listener
     private void publish(ManagedJournal.Entry entry) {
         var id = entry.context().identity();
         current.put(id.instanceId(), entry);
+        claimIndex.put(entry.snapshot());
         receipts.put(entry.context().operationId(), entry);
         pending.remove(id.instanceId());
         drift.remove(id.instanceId());
@@ -458,27 +507,119 @@ public final class DefaultManagedClaimsApi implements ManagedClaimsApi, Listener
     }
     @Override public CompletionStage<ManagedResult> getOperationResult(UUID operationId) {
         Objects.requireNonNull(operationId);
-        return call(() -> {
-            if (!ready) return result(PROVIDER_UNAVAILABLE, null, operationId, lastError);
+        CompletableFuture<ManagedResult> future = track(new CompletableFuture<>());
+        if (!dispatch(() -> {
+            if (!ready) { future.complete(result(PROVIDER_UNAVAILABLE, null, operationId, lastError)); return; }
             var entry = receipts.get(operationId);
-            if (entry != null) return result(entry.confirmed() ? entry.action() == ManagedAction.DELETE ? DELETED : APPLIED : UNCERTAIN,
-                    entry.snapshot(), operationId, "Durable receipt");
+            if (entry != null) {
+                future.complete(result(entry.confirmed() ? entry.action() == ManagedAction.DELETE ? DELETED : APPLIED : UNCERTAIN,
+                        entry.snapshot(), operationId, "Durable receipt")); return;
+            }
             if (running != null && running.context.operationId().equals(operationId)
-                    || queue.stream().anyMatch(j -> j.context.operationId().equals(operationId)))
-                return result(PENDING, null, operationId, "Operation is still executing");
-            return result(NOT_FOUND, null, operationId, "No receipt; no success is implied");
-        }, result(PROVIDER_UNAVAILABLE, null, operationId, "Provider is unavailable"));
+                    || queue.stream().anyMatch(j -> j.context.operationId().equals(operationId))) {
+                future.complete(result(PENDING, null, operationId, "Operation is still executing")); return;
+            }
+            if (journalQueries.incrementAndGet() > capacity) {
+                journalQueries.decrementAndGet();
+                future.complete(result(QUEUE_FULL, null, operationId, "Journal query queue is full")); return;
+            }
+            io.execute(() -> {
+                try {
+                    boolean archived = journal.isRetiredOperation(operationId);
+                    onMain(() -> future.complete(result(archived ? RETIRED : NOT_FOUND, null, operationId,
+                            archived ? "Operation result retired by the controller" : "No receipt; no success is implied")));
+                } catch (Exception error) {
+                    onMain(() -> future.complete(result(PROVIDER_UNAVAILABLE, null, operationId, error.toString())));
+                } finally { journalQueries.decrementAndGet(); }
+            });
+        })) future.complete(result(active ? QUEUE_FULL : PROVIDER_UNAVAILABLE, null, operationId, "Provider cannot accept work"));
+        return future;
+    }
+
+    @Override public CompletionStage<ManagedResult> compactJournal() {
+        return maintainJournal(null, null, 0);
+    }
+
+    private CompletionStage<ManagedResult> maintainJournal(Registration registration,
+                                                          ManagedClaimIdentity identity, long throughRevision) {
+        CompletableFuture<ManagedResult> future = track(new CompletableFuture<>());
+        if (!dispatch(() -> {
+            if (!ready) { future.complete(result(PROVIDER_UNAVAILABLE, null, null, lastError)); return; }
+            ManagedJournal.Entry entry = null;
+            if (identity != null) {
+                if (registration == null || !registration.usable() || !registration.id.equals(identity.controllerId())) {
+                    future.complete(result(CONTROLLER_DENIED, null, null, "Only the owning controller can retire delivery history")); return;
+                }
+                if (!local(identity)) { future.complete(result(WRONG_SERVER, null, null, "Wrong server")); return; }
+                entry = current.get(identity.instanceId());
+                if (entry == null) { future.complete(result(NOT_FOUND, null, null, "No confirmed managed instance")); return; }
+                if (!entry.context().identity().equals(identity)) {
+                    future.complete(result(INSTANCE_CONFLICT, null, null, "Identity binding differs")); return;
+                }
+                var existing = retirements.get(identity.instanceId());
+                if (throughRevision > entry.context().revision()
+                        || existing != null && throughRevision < existing.throughRevision()) {
+                    future.complete(result(PAYLOAD_CONFLICT, entry.snapshot(), null, "Retirement must advance monotonically within confirmed revisions")); return;
+                }
+                if (pending.containsKey(identity.instanceId())) {
+                    future.complete(result(UNCERTAIN, entry.snapshot(), null, "Resolve unfinished work before retiring operations")); return;
+                }
+            }
+            if (running != null || recovering || journalMaintenance || !queue.isEmpty()) {
+                future.complete(result(PENDING, null, null, "Retry journal maintenance after queued work completes")); return;
+            }
+            if (!pending.isEmpty()) {
+                future.complete(result(UNCERTAIN, null, null, "Resolve all unfinished durable work before checkpoint maintenance")); return;
+            }
+            journalMaintenance = true;
+            maintenanceStarted = System.nanoTime();
+            maintenanceFuture = future;
+            ManagedJournal.Entry confirmed = entry;
+            io.execute(() -> {
+                try {
+                    ManagedJournal.Retirement retirement;
+                    if (identity == null) { journal.compact(); retirement = null; }
+                    else {
+                        retirement = journal.retire(identity, throughRevision);
+                        receipts.entrySet().removeIf(receipt -> receipt.getValue().context().identity().equals(identity)
+                                && receipt.getValue().context().revision() <= throughRevision);
+                    }
+                    onMain(() -> {
+                        if (retirement != null) retirements.put(identity.instanceId(), retirement);
+                        journalMaintenance = false;
+                        future.complete(result(APPLIED, confirmed == null ? null : confirmed.snapshot(), null,
+                                identity == null ? "Journal checkpoint durably compacted" : "Delivery retirement durably confirmed"));
+                        recoverNext(); pump();
+                    });
+                } catch (Exception error) {
+                    onMain(() -> {
+                        journalMaintenance = false;
+                        fail("Journal maintenance outcome is uncertain; restart to reconcile durable checkpoint", error);
+                        future.complete(result(UNCERTAIN, null, null, lastError));
+                    });
+                }
+            });
+        })) future.complete(result(active ? QUEUE_FULL : PROVIDER_UNAVAILABLE, null, null, "Provider cannot accept work"));
+        return future;
     }
     @Override public CompletionStage<ManagedClaimPage> listManagedClaims(String controllerId, int offset, int limit) {
         Objects.requireNonNull(controllerId);
         if (offset < 0 || limit < 1 || limit > 100) throw new IllegalArgumentException("Offset >= 0, limit 1..100 required");
         return call(() -> {
             if (!ready) return new ManagedClaimPage(PROVIDER_UNAVAILABLE, List.of(), -1);
-            var entries = current.values().stream().filter(e -> e.context().identity().controllerId().equals(controllerId))
-                    .sorted(Comparator.comparing(e -> e.context().identity().instanceId())).toList();
-            var page = entries.stream().skip(offset).limit(limit).map(ManagedJournal.Entry::snapshot).toList();
-            return new ManagedClaimPage(FOUND, page, (long) offset + page.size() < entries.size() ? offset + page.size() : -1);
+            var page = claimIndex.page(controllerId, offset, limit);
+            return new ManagedClaimPage(FOUND, page.claims(), page.nextOffset());
         }, new ManagedClaimPage(PROVIDER_UNAVAILABLE, List.of(), -1));
+    }
+
+    @Override public CompletionStage<ManagedClaimCursorPage> scanManagedClaims(String controllerId, UUID afterInstanceId, int limit) {
+        Objects.requireNonNull(controllerId);
+        if (limit < 1 || limit > 100) throw new IllegalArgumentException("Limit 1..100 required");
+        return call(() -> {
+            if (!ready) return new ManagedClaimCursorPage(PROVIDER_UNAVAILABLE, List.of(), null, 0);
+            var page = claimIndex.scan(controllerId, afterInstanceId, limit);
+            return new ManagedClaimCursorPage(FOUND, page.claims(), page.nextCursor(), page.generation());
+        }, new ManagedClaimCursorPage(PROVIDER_UNAVAILABLE, List.of(), null, 0));
     }
     @Override public CompletionStage<ManagedDiagnostics> getDiagnostics() {
         return call(() -> {
@@ -489,7 +630,7 @@ public final class DefaultManagedClaimsApi implements ManagedClaimsApi, Listener
             }
             int trusted = (int) leases.values().stream().filter(l -> System.nanoTime() - l.expiresAt() < 0).count();
             int tombstones = (int) current.values().stream().filter(e -> e.action() == ManagedAction.DELETE).count();
-            return new ManagedDiagnostics(ready, queue.size() + (running == null ? 0 : 1), pending.size(), current.size() - tombstones,
+            return new ManagedDiagnostics(ready, queue.size() + (running == null ? 0 : 1) + (journalMaintenance ? 1 : 0), pending.size(), current.size() - tombstones,
                     tombstones, receipts.size(), controllers.size(), trusted, lastError, worlds);
         }, new ManagedDiagnostics(false, 0, 0, 0, 0, 0, 0, 0, "Provider is unavailable", Map.of()));
     }
@@ -499,7 +640,7 @@ public final class DefaultManagedClaimsApi implements ManagedClaimsApi, Listener
             if (!ready) return result(PROVIDER_UNAVAILABLE, null, null, lastError);
             if (!local(identity)) return result(WRONG_SERVER, null, null, "Wrong server");
             if (!regions.isAvailable(identity.worldId())) return result(WORLD_UNAVAILABLE, null, null, "World unavailable");
-            if (pending.containsKey(identity.instanceId()) || running != null || recovering)
+            if (pending.containsKey(identity.instanceId()) || running != null || recovering || journalMaintenance)
                 return result(PENDING, null, null, "Wait for pending work");
             var entry = current.get(identity.instanceId());
             if (entry == null) return result(NOT_FOUND, null, null, "Unknown regions are never removed");
@@ -531,7 +672,7 @@ public final class DefaultManagedClaimsApi implements ManagedClaimsApi, Listener
         }
     }
     private void recoverNext() {
-        if (!ready || running != null || recovering || !active) return;
+        if (!ready || running != null || recovering || journalMaintenance || !active) return;
         for (var entry : pending.values()) {
             var id = entry.context().identity();
             if (!regions.isAvailable(id.worldId())) continue;
@@ -568,6 +709,8 @@ public final class DefaultManagedClaimsApi implements ManagedClaimsApi, Listener
         leases.entrySet().removeIf(e -> now - e.getValue().expiresAt() >= 0);
         if (running != null && now - running.submitted >= timeoutNanos)
             running.future.complete(result(UNCERTAIN, null, running.context.operationId(), "Wait timed out; execution may still complete. Poll the receipt."));
+        if (journalMaintenance && maintenanceFuture != null && now - maintenanceStarted >= timeoutNanos)
+            maintenanceFuture.complete(result(UNCERTAIN, null, null, "Maintenance wait timed out; checkpoint work may still finish. Recheck before retrying."));
         queue.removeIf(job -> {
             if (now - job.submitted < timeoutNanos) return false;
             job.future.complete(result(QUEUE_FULL, null, job.context.operationId(), "Queue wait expired before execution")); return true;
