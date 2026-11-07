@@ -159,6 +159,7 @@ messages:
   claim_delete_cancel_button: "&a[Cancel]"
   claim_delete_cancelled: "&9[⚐] &7Claim deletion cancelled."
   claim_action_expired: "&c[⚐] This action expired or was already used. Open /claim list again."
+  claim_action_cancelled: "&c[⚐] This claim change was cancelled by another plugin."
   claim_delete_changed: "&c[⚐] This claim was changed or deleted. Open /claim list again."
   claim_world_unavailable: "&c[⚐] The claim's world is not loaded."
 

@@ -4,11 +4,13 @@ import com.sk89q.worldedit.bukkit.BukkitAdapter;
 import com.sk89q.worldedit.math.BlockVector3;
 import com.sk89q.worldguard.WorldGuard;
 import com.sk89q.worldguard.protection.managers.RegionManager;
-import com.sk89q.worldguard.protection.managers.RemovalStrategy;
 import com.sk89q.worldguard.protection.regions.ProtectedCuboidRegion;
 import com.sk89q.worldguard.protection.regions.ProtectedRegion;
 import com.sk89q.worldguard.protection.regions.RegionContainer;
 import com.twilight.claims.TwilightClaims;
+import com.twilight.claims.api.ClaimBounds;
+import com.twilight.claims.api.ClaimKey;
+import com.twilight.claims.api.ClaimOperationException;
 import org.bukkit.Bukkit;
 import org.bukkit.Location;
 import org.bukkit.World;
@@ -53,7 +55,11 @@ public class WGHook {
     public record ClaimRef(World world, ProtectedRegion region) {}
 
     public boolean isOwner(Player player, ProtectedRegion region) {
-        return isClaim(region) && region.getOwners().contains(player.getUniqueId());
+        return isOwner(player.getUniqueId(), region);
+    }
+
+    public boolean isOwner(UUID owner, ProtectedRegion region) {
+        return isClaim(region) && region.getOwners().contains(owner);
     }
 
     public ProtectedRegion getRegionAt(Location location) {
@@ -99,10 +105,14 @@ public class WGHook {
     }
 
     public List<ClaimRef> getOwnedClaims(Player player) {
+        return getOwnedClaims(player.getUniqueId());
+    }
+
+    public List<ClaimRef> getOwnedClaims(UUID owner) {
         List<ClaimRef> regions = new ArrayList<>();
         for (World world : Bukkit.getWorlds()) {
             for (ProtectedRegion region : getAllRegions(world)) {
-                if (isOwner(player, region)) regions.add(new ClaimRef(world, region));
+                if (isOwner(owner, region)) regions.add(new ClaimRef(world, region));
             }
         }
         regions.sort(Comparator
@@ -257,6 +267,19 @@ public class WGHook {
             return null;
         }
 
+        try {
+            var created = plugin.getApi().createClaim(p.getUniqueId(), w,
+                    new ClaimBounds((int) minX, minY, (int) minZ, (int) maxX, maxY, (int) maxZ), true);
+            return getClaim(created.key().worldId(), created.key().regionId());
+        } catch (ClaimOperationException exception) {
+            sendOperationFailure(p, exception, (maxX - minX + 1) * (maxZ - minZ + 1));
+            return null;
+        }
+    }
+
+    public String newRegionId(UUID owner, World world) {
+        RegionManager rm = getManager(world);
+        if (rm == null) throw new IllegalStateException("WorldGuard is unavailable for this world");
         Set<Long> occupied = new HashSet<>();
         Set<String> existingIds = new HashSet<>(rm.getRegions().keySet());
         for (World loaded : Bukkit.getWorlds()) {
@@ -264,31 +287,21 @@ public class WGHook {
             if (loadedManager == null) continue;
             existingIds.addAll(loadedManager.getRegions().keySet());
             for (ProtectedRegion existing : loadedManager.getRegions().values()) {
-                if (isOwner(p, existing)) {
+                if (isOwner(owner, existing)) {
                     ClaimIdentity.numberOf(existing.getId()).ifPresent(occupied::add);
                 }
             }
         }
         for (ProtectedRegion existing : rm.getRegions().values()) {
-            if (isOwner(p, existing)) ClaimIdentity.numberOf(existing.getId()).ifPresent(occupied::add);
+            if (isOwner(owner, existing)) ClaimIdentity.numberOf(existing.getId()).ifPresent(occupied::add);
         }
         long number = ClaimIdentity.nextNumber(occupied);
-        String id = ClaimIdentity.newId(number, candidate -> {
+        return ClaimIdentity.newId(number, candidate -> {
             String prefix = candidate.substring(0, 16);
             return existingIds.stream().anyMatch(existing -> existing.equals(candidate)
                     || existing.equals(prefix) || existing.startsWith(prefix + "_"));
         });
 
-        ProtectedRegion region = new ProtectedCuboidRegion(id, newMin, newMax);
-        region.getOwners().addPlayer(p.getUniqueId());
-
-        rm.addRegion(region);
-        if (!save(w)) {
-            rm.removeRegion(id, RemovalStrategy.UNSET_PARENT_IN_CHILDREN);
-            plugin.getMessages().send(p, "region_save_failed", text -> text);
-            return null;
-        }
-        return region;
     }
 
     public boolean removeClaim(Player player, Location location) {
@@ -310,13 +323,27 @@ public class WGHook {
             plugin.getMessages().send(player, "region_has_children", text -> text);
             return false;
         }
-        manager.removeRegion(region.getId(), RemovalStrategy.UNSET_PARENT_IN_CHILDREN);
-        if (!save(world)) {
-            manager.addRegion(region);
-            plugin.getMessages().send(player, "region_save_failed", text -> text);
+        try {
+            plugin.getApi().deleteClaim(new ClaimKey(world.getUID(), regionId));
+            return true;
+        } catch (ClaimOperationException exception) {
+            sendOperationFailure(player, exception, getArea(region));
             return false;
         }
-        return true;
+    }
+
+    private void sendOperationFailure(Player player, ClaimOperationException exception, long area) {
+        String message = switch (exception.getReason()) {
+            case SAVE_FAILED -> "region_save_failed";
+            case CANCELLED -> "claim_action_cancelled";
+            case NOT_ENOUGH_POINTS -> "not_enough_points";
+            case HAS_CHILDREN -> "region_has_children";
+            case NOT_FOUND -> "no_region";
+            default -> "region_invalid_size";
+        };
+        plugin.getMessages().send(player, message, text -> text.replace("%need%", String.valueOf(area))
+                .replace("%free%", String.valueOf(exception.getReason() == ClaimOperationException.Reason.NOT_ENOUGH_POINTS
+                        ? plugin.getApi().getPoints(player).free() : 0)));
     }
 
     public long getArea(ProtectedRegion region) {

@@ -1,6 +1,9 @@
 package com.twilight.claims.command.trust;
 
 import com.twilight.claims.config.Messages;
+import com.twilight.claims.TwilightClaims;
+import com.twilight.claims.api.ClaimKey;
+import com.twilight.claims.api.ClaimOperationException;
 import com.twilight.claims.wg.ClaimIdentity;
 import com.twilight.claims.wg.WGHook;
 import com.sk89q.worldguard.protection.regions.ProtectedRegion;
@@ -35,10 +38,11 @@ public class TrustRemoveCommand {
             return;
         }
 
-        region.getMembers().removePlayer(target.getUniqueId());
-        if (!wg.save(player.getWorld())) {
-            region.getMembers().addPlayer(target.getUniqueId());
-            msg.send(player, "region_save_failed", text -> text);
+        try {
+            TwilightClaims.getInstance().getApi().removeMember(new ClaimKey(player.getWorld().getUID(), region.getId()), target.getUniqueId());
+        } catch (ClaimOperationException exception) {
+            msg.send(player, exception.getReason() == ClaimOperationException.Reason.CANCELLED
+                    ? "claim_action_cancelled" : "region_save_failed", text -> text);
             return;
         }
 

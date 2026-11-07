@@ -3,6 +3,7 @@ package com.twilight.claims.visual;
 import com.sk89q.worldedit.math.BlockVector3;
 import com.sk89q.worldguard.protection.regions.ProtectedRegion;
 import com.twilight.claims.TwilightClaims;
+import com.twilight.claims.api.BoundaryStyle;
 import com.twilight.claims.tool.ShovelToolListener.CornerType;
 import org.bukkit.Bukkit;
 import org.bukkit.Location;
@@ -13,11 +14,13 @@ import org.bukkit.entity.Player;
 import org.bukkit.scheduler.BukkitTask;
 
 import java.util.EnumMap;
+import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.UUID;
+import java.util.Optional;
 
 public class RegionVisualizer {
 
@@ -30,6 +33,7 @@ public class RegionVisualizer {
     private final Material selectedCornerMaterial;
     private final Material cornerMaterialError;
     private final Material extendMaterialError;
+    private final BoundaryStyle defaultStyle;
     private final double maxDistance;
     private final double maxDistanceSq;
     private final boolean onlyLoadedChunks;
@@ -38,6 +42,7 @@ public class RegionVisualizer {
     private final int stepBig;
     private final Map<Material, BlockData> blockData = new EnumMap<>(Material.class);
     private final Map<UUID, View> views = new HashMap<>();
+    private final Map<String, String> warnedStyles = new HashMap<>();
 
     public RegionVisualizer(TwilightClaims plugin) {
         this.plugin = plugin;
@@ -46,6 +51,8 @@ public class RegionVisualizer {
         selectedCornerMaterial = configuredBlock("visual.pos1-block", Material.DIAMOND_BLOCK);
         cornerMaterialError = configuredBlock("visual.corner-block_error", Material.SHROOMLIGHT);
         extendMaterialError = configuredBlock("visual.extend-block_error", Material.CRIMSON_NYLIUM);
+        defaultStyle = new BoundaryStyle(cornerMaterial, extendMaterial, selectedCornerMaterial,
+                cornerMaterialError, extendMaterialError);
 
         double configuredDistance = plugin.getConfig().getDouble("visual.max-distance", 64.0);
         maxDistance = Double.isFinite(configuredDistance) ? configuredDistance : 64.0;
@@ -59,7 +66,7 @@ public class RegionVisualizer {
     private Material configuredBlock(String path, Material fallback) {
         String name = plugin.getConfig().getString(path, fallback.name());
         Material material = name == null ? null : Material.matchMaterial(name);
-        if (material == null) {
+        if (material == null || !material.isBlock() || material.isAir()) {
             plugin.getLogger().warning("Invalid block material at " + path + "; using " + fallback);
             material = fallback;
         }
@@ -73,28 +80,127 @@ public class RegionVisualizer {
         return material;
     }
 
+    public BoundaryStyle getDefaultBoundaryStyle() {
+        return defaultStyle;
+    }
+
+    public Optional<BoundaryStyle> getBoundaryStyleOverride(ProtectedRegion region) {
+        String value = BoundaryStyles.raw(region);
+        if (value == null) {
+            warnedStyles.remove(region.getId());
+            return Optional.empty();
+        }
+        try {
+            BoundaryStyle style = BoundaryStyles.decode(value);
+            warnedStyles.remove(region.getId());
+            return Optional.of(style);
+        } catch (IllegalArgumentException ex) {
+            if (!value.equals(warnedStyles.put(region.getId(), value))) {
+                plugin.getLogger().warning("Invalid boundary style on WorldGuard region " + region.getId()
+                        + "; using configured defaults: " + ex.getMessage());
+            }
+            return Optional.empty();
+        }
+    }
+
+    public BoundaryStyle getBoundaryStyle(ProtectedRegion region) {
+        return getBoundaryStyleOverride(region).orElse(defaultStyle);
+    }
+
+    public boolean isVisualizing(Player player) {
+        return views.containsKey(player.getUniqueId());
+    }
+
+    public void refreshRegion(World world, ProtectedRegion region) {
+        for (var entry : new ArrayList<>(views.entrySet())) {
+            View view = entry.getValue();
+            if (!view.worldId.equals(world.getUID())) continue;
+            if (!containsRegion(view.normalRegions, region.getId()) && !containsRegion(view.errorRegions, region.getId())) continue;
+            Player player = Bukkit.getPlayer(entry.getKey());
+            if (player == null || !player.isOnline()) continue;
+            if (!view.worldId.equals(player.getWorld().getUID())) {
+                clear(player);
+                continue;
+            }
+            view.normalRegions = replaceRegion(view.normalRegions, region);
+            view.errorRegions = replaceRegion(view.errorRegions, region);
+            view.normal = render(player, view.normalRegions, view, false);
+            view.error = render(player, view.errorRegions, view, true);
+            refresh(player, view);
+        }
+    }
+
+    public void clearRegion(World world, String regionId) {
+        for (var entry : new ArrayList<>(views.entrySet())) {
+            View view = entry.getValue();
+            if (!view.worldId.equals(world.getUID())) continue;
+            if (!containsRegion(view.normalRegions, regionId) && !containsRegion(view.errorRegions, regionId)) continue;
+            Player player = Bukkit.getPlayer(entry.getKey());
+            if (player == null || !player.isOnline()) continue;
+            if (!view.worldId.equals(player.getWorld().getUID())) {
+                clear(player);
+                continue;
+            }
+            view.normalRegions = view.normalRegions.stream().filter(region -> !region.getId().equals(regionId)).toList();
+            view.errorRegions = view.errorRegions.stream().filter(region -> !region.getId().equals(regionId)).toList();
+            if (regionId.equals(view.selectedRegion)) {
+                view.selectedRegion = null;
+                view.selectedCorner = null;
+            }
+            if (view.normalRegions.isEmpty()) {
+                cancel(view.normalClear);
+                view.normalClear = null;
+                view.manualNormal = false;
+            }
+            if (view.errorRegions.isEmpty()) {
+                cancel(view.errorClear);
+                view.errorClear = null;
+            }
+            view.normal = render(player, view.normalRegions, view, false);
+            view.error = render(player, view.errorRegions, view, true);
+            refresh(player, view);
+            discardIfEmpty(entry.getKey(), view);
+        }
+    }
+
+    private static boolean containsRegion(List<ProtectedRegion> regions, String id) {
+        return regions.stream().anyMatch(region -> region.getId().equals(id));
+    }
+
+    private static List<ProtectedRegion> replaceRegion(List<ProtectedRegion> regions, ProtectedRegion replacement) {
+        return regions.stream().map(region -> region.getId().equals(replacement.getId()) ? replacement : region).toList();
+    }
+
     public void show(Player player, ProtectedRegion region, CornerType selectedCorner) {
+        show(player, region, selectedCorner, Math.max(0, plugin.getConfig().getLong("visual.visual-duration-ticks", 0)));
+    }
+
+    public void show(Player player, ProtectedRegion region, CornerType selectedCorner, long durationTicks) {
+        if (durationTicks < 0 || durationTicks > Long.MAX_VALUE / 2) {
+            throw new IllegalArgumentException("Invalid visualization duration");
+        }
         View view = view(player);
         cancel(view.normalClear);
         view.normalClear = null;
         view.manualNormal = true;
         view.selectedRegion = selectedCorner == null ? null : region.getId();
         view.selectedCorner = selectedCorner;
-        view.normal = render(player, List.of(region), view, false);
+        view.normalRegions = List.of(region);
+        view.normal = render(player, view.normalRegions, view, false);
         refresh(player, view);
 
-        int duration = plugin.getConfig().getInt("visual.visual-duration-ticks", 0);
-        if (duration > 0) {
+        if (durationTicks > 0) {
             UUID id = player.getUniqueId();
             view.normalClear = Bukkit.getScheduler().runTaskLater(plugin, () -> {
                 view.normalClear = null;
                 view.manualNormal = false;
+                view.normalRegions = List.of();
                 view.normal.clear();
                 view.selectedRegion = null;
                 view.selectedCorner = null;
                 refreshOnline(id, view);
                 discardIfEmpty(id, view);
-            }, duration);
+            }, durationTicks);
         }
     }
 
@@ -104,12 +210,46 @@ public class RegionVisualizer {
         view.normalClear = null;
         view.manualNormal = false;
         if (selectedCorner != null) view.selectedCorner = selectedCorner;
-        view.normal = render(player, regions, view, false);
+        view.normalRegions = List.copyOf(regions);
+        view.normal = render(player, view.normalRegions, view, false);
         refresh(player, view);
         discardIfEmpty(player.getUniqueId(), view);
     }
 
+    public void showListTemporary(Player player, List<ProtectedRegion> regions, long durationTicks) {
+        if (durationTicks < 0 || durationTicks > Long.MAX_VALUE / 2) {
+            throw new IllegalArgumentException("Invalid visualization duration");
+        }
+        List<ProtectedRegion> requestedRegions = List.copyOf(regions);
+        View view = view(player);
+        cancel(view.normalClear);
+        view.normalClear = null;
+        view.manualNormal = true;
+        view.selectedRegion = null;
+        view.selectedCorner = null;
+        view.normalRegions = requestedRegions;
+        view.normal = render(player, view.normalRegions, view, false);
+        refresh(player, view);
+        if (durationTicks > 0) {
+            UUID id = player.getUniqueId();
+            view.normalClear = Bukkit.getScheduler().runTaskLater(plugin, () -> {
+                view.normalClear = null;
+                view.manualNormal = false;
+                view.normalRegions = List.of();
+                view.normal.clear();
+                view.selectedRegion = null;
+                view.selectedCorner = null;
+                refreshOnline(id, view);
+                discardIfEmpty(id, view);
+            }, durationTicks);
+        }
+    }
+
     public void showErrorTemporary(Player player, ProtectedRegion region, int seconds) {
+        showError(player, region, seconds);
+    }
+
+    public void showErrorTemporary(Player player, ProtectedRegion region, long seconds) {
         showError(player, region, seconds);
     }
 
@@ -121,16 +261,18 @@ public class RegionVisualizer {
         if (seconds <= 0) return;
         View view = view(player);
         cancel(view.errorClear);
-        view.error = render(player, List.of(region), view, true);
+        view.errorRegions = List.of(region);
+        view.error = render(player, view.errorRegions, view, true);
         refresh(player, view);
 
         UUID id = player.getUniqueId();
         view.errorClear = Bukkit.getScheduler().runTaskLater(plugin, () -> {
             view.errorClear = null;
+            view.errorRegions = List.of();
             view.error.clear();
             refreshOnline(id, view);
             discardIfEmpty(id, view);
-        }, Math.min(seconds, Long.MAX_VALUE / 20) * 20L);
+        }, Math.min(seconds, Long.MAX_VALUE / 40) * 20L);
     }
 
     public boolean isErrorActive(Player player) {
@@ -153,17 +295,18 @@ public class RegionVisualizer {
         World world = player.getWorld();
         for (ProtectedRegion region : regions) {
             if (markers.size() >= MAX_MARKERS) break;
+            BoundaryStyle style = getBoundaryStyle(region);
             BlockVector3 min = region.getMinimumPoint();
             BlockVector3 max = region.getMaximumPoint();
             CornerType selected = region.getId().equals(view.selectedRegion) ? view.selectedCorner : null;
             boolean extendX = min.x() < max.x();
             boolean extendZ = min.z() < max.z();
-            addCorner(markers, world, min.x(), min.z(), CornerType.MIN_MIN, selected, origin, error, extendX, extendZ);
-            addCorner(markers, world, min.x(), max.z(), CornerType.MIN_MAX, selected, origin, error, extendX, extendZ);
-            addCorner(markers, world, max.x(), min.z(), CornerType.MAX_MIN, selected, origin, error, extendX, extendZ);
-            addCorner(markers, world, max.x(), max.z(), CornerType.MAX_MAX, selected, origin, error, extendX, extendZ);
+            addCorner(markers, world, min.x(), min.z(), CornerType.MIN_MIN, selected, origin, error, extendX, extendZ, style);
+            addCorner(markers, world, min.x(), max.z(), CornerType.MIN_MAX, selected, origin, error, extendX, extendZ, style);
+            addCorner(markers, world, max.x(), min.z(), CornerType.MAX_MIN, selected, origin, error, extendX, extendZ, style);
+            addCorner(markers, world, max.x(), max.z(), CornerType.MAX_MAX, selected, origin, error, extendX, extendZ, style);
             if ((long) max.x() - min.x() > 6 || (long) max.z() - min.z() > 6) {
-                Material material = error ? extendMaterialError : extendMaterial;
+                Material material = error ? style.errorEdge() : style.edge();
                 addEdge(markers, world, min.x(), min.z(), max.x(), min.z(), material, origin);
                 addEdge(markers, world, min.x(), max.z(), max.x(), max.z(), material, origin);
                 addEdge(markers, world, min.x(), min.z(), min.x(), max.z(), material, origin);
@@ -172,20 +315,21 @@ public class RegionVisualizer {
             if (selected != null && !error) {
                 int x = selected == CornerType.MIN_MIN || selected == CornerType.MIN_MAX ? min.x() : max.x();
                 int z = selected == CornerType.MIN_MIN || selected == CornerType.MAX_MIN ? min.z() : max.z();
-                addMarker(markers, world, x, z, selectedCornerMaterial, origin, true);
+                addMarker(markers, world, x, z, style.selectedCorner(), origin, true);
             }
         }
         return markers;
     }
 
     private void addCorner(Map<Location, Material> markers, World world, int x, int z, CornerType type,
-                           CornerType selected, Location origin, boolean error, boolean extendX, boolean extendZ) {
-        Material material = error ? cornerMaterialError : selected == type ? selectedCornerMaterial : cornerMaterial;
+                           CornerType selected, Location origin, boolean error, boolean extendX, boolean extendZ,
+                           BoundaryStyle style) {
+        Material material = error ? style.errorCorner() : selected == type ? style.selectedCorner() : style.corner();
         addMarker(markers, world, x, z, material, origin, true);
         int dx = type == CornerType.MIN_MIN || type == CornerType.MIN_MAX ? 1 : -1;
         int dz = type == CornerType.MIN_MIN || type == CornerType.MAX_MIN ? 1 : -1;
-        if (extendX) addMarker(markers, world, (long) x + dx, z, error ? extendMaterialError : extendMaterial, origin);
-        if (extendZ) addMarker(markers, world, x, (long) z + dz, error ? extendMaterialError : extendMaterial, origin);
+        if (extendX) addMarker(markers, world, (long) x + dx, z, error ? style.errorEdge() : style.edge(), origin);
+        if (extendZ) addMarker(markers, world, x, (long) z + dz, error ? style.errorEdge() : style.edge(), origin);
     }
 
     private void addEdge(Map<Location, Material> markers, World world, int x1, int z1, int x2, int z2,
@@ -251,7 +395,7 @@ public class RegionVisualizer {
         }
         for (var marker : next.entrySet()) {
             if (marker.getValue() != view.rendered.get(marker.getKey())) {
-                player.sendBlockChange(marker.getKey(), blockData.get(marker.getValue()));
+                player.sendBlockChange(marker.getKey(), blockData.computeIfAbsent(marker.getValue(), Material::createBlockData));
             }
         }
         view.rendered = next;
@@ -277,6 +421,7 @@ public class RegionVisualizer {
         View view = views.get(player.getUniqueId());
         if (view == null || view.manualNormal) return;
         view.normal.clear();
+        view.normalRegions = List.of();
         view.selectedRegion = null;
         view.selectedCorner = null;
         refresh(player, view);
@@ -293,6 +438,7 @@ public class RegionVisualizer {
             }
         }
         views.clear();
+        warnedStyles.clear();
     }
 
     private void discardIfEmpty(UUID id, View view) {
@@ -309,6 +455,8 @@ public class RegionVisualizer {
         private Map<Location, Material> normal = new LinkedHashMap<>();
         private Map<Location, Material> error = new LinkedHashMap<>();
         private Map<Location, Material> rendered = new LinkedHashMap<>();
+        private List<ProtectedRegion> normalRegions = List.of();
+        private List<ProtectedRegion> errorRegions = List.of();
         private BukkitTask normalClear;
         private BukkitTask errorClear;
         private boolean manualNormal;

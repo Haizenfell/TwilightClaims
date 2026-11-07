@@ -1,6 +1,8 @@
 package com.twilight.claims;
 
 import com.twilight.claims.command.ClaimCommand;
+import com.twilight.claims.api.TwilightClaimsApi;
+import com.twilight.claims.api.DefaultTwilightClaimsApi;
 import com.twilight.claims.command.CommandManager;
 import com.twilight.claims.command.TrustCommand;
 import com.twilight.claims.command.claim.ClaimDeletionService;
@@ -14,9 +16,11 @@ import com.twilight.claims.tool.ShovelToolListener;
 import com.twilight.claims.tool.StickToolListener;
 import com.twilight.claims.visual.AutoRegionViewListener;
 import com.twilight.claims.visual.RegionVisualizer;
+import com.twilight.claims.visual.BoundaryStyles;
 import com.twilight.claims.wg.WGHook;
 import org.bukkit.Bukkit;
 import org.bukkit.plugin.Plugin;
+import org.bukkit.plugin.ServicePriority;
 import org.bukkit.plugin.java.JavaPlugin;
 import org.bukkit.event.EventHandler;
 import org.bukkit.event.Listener;
@@ -36,6 +40,17 @@ public class TwilightClaims extends JavaPlugin {
     private RegionVisualizer visualizer;
     private TwilightClaimsExpansion expansion;
     private ClaimDeletionService deletions;
+    private DefaultTwilightClaimsApi api;
+
+    public TwilightClaimsApi getApi() {
+        if (api == null || !isEnabled()) throw new IllegalStateException("TwilightClaims is not enabled");
+        return api;
+    }
+
+    @Override
+    public void onLoad() {
+        BoundaryStyles.registerFlag();
+    }
 
     public static TwilightClaims getInstance() {
         return instance;
@@ -62,6 +77,7 @@ public class TwilightClaims extends JavaPlugin {
         claimManager = new ClaimManager(wgHook, claimsConfig, new PlaceholderResolver(this));
         visualizer = new RegionVisualizer(this);
         deletions = new ClaimDeletionService(wgHook, messages, visualizer);
+        api = new DefaultTwilightClaimsApi(this, wgHook, claimsConfig, claimManager, visualizer, deletions, messages);
         Bukkit.getPluginManager().registerEvents(deletions, this);
 
         Plugin papi = Bukkit.getPluginManager().getPlugin("PlaceholderAPI");
@@ -116,6 +132,7 @@ public class TwilightClaims extends JavaPlugin {
         Bukkit.getScheduler().runTaskTimer(this,
                 () -> Bukkit.getOnlinePlayers().forEach(claimManager::refresh), 1L, 20L);
 
+        Bukkit.getServicesManager().register(TwilightClaimsApi.class, api, this, ServicePriority.Normal);
         getLogger().info("TwilightClaims enabled.");
     }
 
@@ -126,6 +143,8 @@ public class TwilightClaims extends JavaPlugin {
 
     @Override
     public void onDisable() {
+        Bukkit.getServicesManager().unregisterAll(this);
+        if (api != null) api.close();
         if (deletions != null) deletions.close();
         if (visualizer != null) visualizer.close();
         if (expansion != null) {

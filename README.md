@@ -23,7 +23,7 @@ Set `JAVA_HOME` to a JDK 26 installation and run:
 mvn clean package
 ```
 
-The plugin JAR is `target/TwilightClaims-1.5.jar`.
+The plugin JAR is `target/TwilightClaims-1.6.0.jar`. The build also produces `target/TwilightClaims-1.6.0-api.jar` for other plugin developers.
 
 1. Install WorldEdit and WorldGuard on the server.
 2. Install PlaceholderAPI if you need purchased points or the plugin's placeholders.
@@ -188,3 +188,157 @@ Placeholder values come from a snapshot refreshed on the main thread once per se
 | `actionbar.duration-ticks` | Duration of repeated shovel actionbar messages. |
 
 Message templates support placeholders such as `%id%`, `%owner%`, `%x%`, `%z%`, `%world%` and `%area%`, depending on the message. Use the bundled `config.yml` as the reference when customizing templates.
+
+## Developer API
+
+The complete method reference, data contracts and runnable integration example are in [API.md](API.md).
+
+The public API is `com.twilight.claims.api.TwilightClaimsApi`, registered with Bukkit's `ServicesManager`. API version `1` is exposed as `TwilightClaimsApi.API_VERSION`. Use the public interface and immutable `Claim`, `ClaimKey`, `ClaimBounds`, `ClaimPoints` and `BoundaryStyle` values rather than internal managers or live WorldGuard region objects.
+
+Install TwilightClaims into your local Maven repository with `mvn clean install`, then add this dependency to the consuming plugin:
+
+```xml
+<dependency>
+    <groupId>com.twilight</groupId>
+    <artifactId>TwilightClaims</artifactId>
+    <version>1.6.0</version>
+    <classifier>api</classifier>
+    <scope>provided</scope>
+</dependency>
+```
+
+Declare your own Paper API dependency as `provided`. Add the WorldGuard API as `provided` when using the typed flag methods. Do not shade the TwilightClaims API into your plugin: all plugins must share the service's API classes.
+
+Add the runtime dependency to your `plugin.yml`:
+
+```yaml
+depend: [TwilightClaims]
+```
+
+Resolve the API in your plugin's `onEnable()`:
+
+```java
+TwilightClaimsApi api = Bukkit.getServicesManager().load(TwilightClaimsApi.class);
+if (api == null) {
+    throw new IllegalStateException("TwilightClaims API is unavailable");
+}
+```
+
+The service is unregistered when TwilightClaims is disabled. Previously obtained service instances reject further calls after shutdown. `TwilightClaims#getApi()` is also available when depending on the complete plugin artifact instead of the API classifier.
+
+### API operations
+
+| Area | Methods |
+| --- | --- |
+| Discovery | `getClaims()`, `getClaims(World)`, `getClaims(UUID)`, `getClaim(ClaimKey)`, `findClaim(UUID, long)` |
+| Spatial queries | `getClaimAt(Location)`, `getClaimAt(Player, Location)`, `findNearestClaim(Location, double)`, `hasConflict(World, ClaimBounds, ClaimKey)` |
+| Lifecycle | `createClaim(...)`, `createChildClaim(...)`, `resizeClaim(...)`, `deleteClaim(ClaimKey)`, `transferOwner(...)` |
+| Membership | `isOwner(...)`, `isTrusted(...)`, `addMember(...)`, `removeMember(...)`, `clearMembers(...)` |
+| WorldGuard metadata | `getFlag(...)`, `getFlags(...)`, `setFlag(...)`, `clearFlags(...)`, `setPriority(...)`, `setParent(...)` |
+| Boundary styles | `getDefaultBoundaryStyle()`, `getBoundaryStyle(...)`, `getBoundaryStyleOverride(...)`, `setBoundaryStyle(...)`, `resetBoundaryStyle(...)` |
+| Visualization | `showBoundary(...)`, `showErrorBoundary(...)`, `showOwnedBoundaries(Player)`, `clearBoundaries(Player)`, `isVisualizing(Player)` |
+| Points | `getPoints(Player)`, `getCachedPoints(UUID)`, `canAfford(Player, long)` |
+| Tools and player UI | `getShovel()`, `getInspector()`, `isShovel(ItemStack)`, `isInspector(ItemStack)`, `showClaimList(Player, int)`, `requestDeletion(Player, ClaimKey)` |
+
+`ClaimKey` contains the world UUID and permanent WorldGuard ID. A short name such as `claim_2` is only a player-facing label. Use `findClaim(ownerUuid, 2)` to resolve a personal number, then retain the returned key for subsequent operations. When ownership is transferred, a conflicting personal number can require a new permanent ID; always use the returned `Claim.key()` after a transfer.
+
+Snapshots are immutable and do not update automatically. Call `getClaim(key)` again after changes. All claim queries, mutations, tool operations and visualizations require the server main thread. Schedule work with Bukkit's scheduler when calling from an asynchronous task. `getCachedPoints(UUID)` is safe to read asynchronously and returns an empty value until a snapshot is available; `getPluginVersion()` only reads plugin metadata.
+
+The API is a trusted server-plugin interface. Direct mutations do not check a player's command permissions or require chat confirmation. `requestDeletion` provides the normal permission-checked confirmation flow instead. Creation, resizing and transfer accept `enforcePointLimit`: use `true` to apply the owner's current point budget, which requires that owner to be online. `false` explicitly allows trusted provisioning for offline owners without point checks. World-border, build-height, minimum-size, overlap, parent/child and persistence checks still apply. API operations manage recognized TwilightClaims claims, not arbitrary administrative regions.
+
+Points are calculated from the existing playtime and external purchased-points sources. The API reads these values; it does not overwrite an external economy or PlaceholderAPI provider's balance.
+
+### Create a claim with custom boundary blocks
+
+```java
+BoundaryStyle style = new BoundaryStyle(
+        Material.EMERALD_BLOCK,
+        Material.GOLD_BLOCK,
+        Material.DIAMOND_BLOCK,
+        Material.REDSTONE_BLOCK,
+        Material.LAPIS_BLOCK
+);
+Claim claim = api.createClaim(
+        ownerUuid,
+        world,
+        ClaimBounds.fullHeight(world, 100, 100, 110, 110),
+        style,
+        false
+);
+```
+
+The five materials represent the normal corner, normal edge, selected corner during editing, error/discovery corner and error/discovery edge. Every material must be a non-air block. A shorter `new BoundaryStyle(corner, edge)` constructor uses those two materials for all states.
+
+Create a contained subregion with `createChildClaim`. The parent must be a recognized TwilightClaims claim in a loaded world. Its cuboid and all ancestors must contain the entire child; siblings and unrelated regions must not overlap it. Child styles are independent: use `null` for the global default or pass a custom style.
+
+```java
+Claim parent = api.createClaim(
+        ownerUuid,
+        world,
+        ClaimBounds.fullHeight(world, 200, 200, 240, 240),
+        false
+);
+Claim child = api.createChildClaim(
+        ownerUuid,
+        parent.key(),
+        ClaimBounds.fullHeight(world, 205, 205, 215, 215),
+        new BoundaryStyle(Material.OBSIDIAN, Material.CRYING_OBSIDIAN),
+        false
+);
+```
+
+Parents and children remain separate claims for point accounting, so overlapping parent and child areas each contribute to their respective owner's usage. The `enforcePointLimit` argument follows the same rules as normal creation. A parent with children cannot be deleted until its children have been removed or detached.
+
+The style belongs to that region and is saved with its WorldGuard flags using `twilightclaims-boundary-style`. It survives restarts, resizing and ownership changes. The claim shovel, automatic boundary display, inspector discovery and API visualization all use the same style. Claims without an override use the existing `visual` configuration.
+
+```java
+api.setBoundaryStyle(claim.key(), new BoundaryStyle(Material.OBSIDIAN, Material.CRYING_OBSIDIAN));
+api.showBoundary(viewer, claim.key(), 200L);
+api.showErrorBoundary(viewer, claim.key(), 5L);
+api.clearBoundaries(viewer);
+api.resetBoundaryStyle(claim.key());
+```
+
+`showBoundary` durations use ticks; `showErrorBoundary` durations use seconds. The viewer must be in the same world as the claim. Displays remain client-side and obey the configured marker-distance, chunk and work limits. Style changes refresh active displays. Resetting an override restores the global configured materials.
+
+### Metadata and events
+
+```java
+api.addMember(claim.key(), trustedPlayerUuid);
+api.setFlag(claim.key(), Flags.PVP, StateFlag.State.DENY);
+api.setFlag(claim.key(), Flags.PVP, null);
+api.setPriority(claim.key(), 10);
+api.setParent(child.key(), parent.key());
+api.setParent(child.key(), null);
+```
+
+Passing `null` to `setFlag` clears that flag; passing `null` to `setParent` clears the parent. `clearFlags` removes all explicit flags, including any custom boundary-style override. Flags supplied to `setFlag` must be registered with WorldGuard. Collection-valued inputs and outputs are copied so changing a caller-owned collection cannot silently alter a claim. Parent and child must be in the same loaded world, inheritance must be acyclic and the parent's volume must contain the child. Deleting a claim with children is rejected.
+
+`com.twilight.claims.api.event.ClaimPreChangeEvent` is cancellable and exposes the change type, optional previous snapshot and proposed values. `ClaimChangeEvent` is sent after a successful persisted change and exposes optional before/after snapshots. `ClaimChangeType` identifies creation, resizing, deletion, transfer, membership, flags, priority, parent and boundary-style changes. These events also cover the corresponding built-in player operations. Schedule follow-up mutations rather than changing claims synchronously from a pre-change listener.
+
+`ClaimPreChangeEvent.getChanges()` is an immutable map with these keys:
+
+| Change | Proposed values |
+| --- | --- |
+| `CREATE` | `owner` (UUID), `worldId` (UUID), `bounds` (ClaimBounds), `enforcePointLimit` (boolean), optional `boundaryStyle` and `parent` (ClaimKey). |
+| `RESIZE` | `bounds`, `enforcePointLimit`. |
+| `TRANSFER_OWNER` | `owner`, `enforcePointLimit`. |
+| `ADD_MEMBER`, `REMOVE_MEMBER` | `member` (UUID). |
+| `SET_FLAG` | `flag` (registered flag name), optional `value`; an absent value clears the flag. |
+| `SET_PRIORITY` | `priority` (int). |
+| `SET_PARENT` | Optional `parent`; an absent parent clears the relationship. |
+| `SET_BOUNDARY_STYLE` | `boundaryStyle` (BoundaryStyle). |
+
+Deletion, member/flag clearing and style reset use an empty map. Creation has no previous snapshot, and deletion has no resulting snapshot. Changes made directly through WorldGuard outside this API do not produce TwilightClaims events.
+
+```java
+@EventHandler
+public void onClaimChange(ClaimPreChangeEvent event) {
+    if (event.getChangeType() == ClaimChangeType.DELETE
+            && event.getBefore().map(claim -> protectedClaimKeys.contains(claim.key())).orElse(false)) {
+        event.setCancelled(true);
+    }
+}
+```
+
+Mutations can throw `ClaimOperationException`; inspect `getReason()` for `NOT_FOUND`, `WORLD_UNAVAILABLE`, `INVALID_BOUNDS`, `CONFLICT`, `NOT_ENOUGH_POINTS`, `HAS_CHILDREN`, `SAVE_FAILED`, `INVALID_OWNER`, `INVALID_STATE` or `CANCELLED`. Invalid arguments and off-thread access use `IllegalArgumentException` or `IllegalStateException`. A cancelled or failed change does not emit a successful post-change event. WorldGuard save failures restore the previous region state.

@@ -9,6 +9,7 @@ import org.bukkit.Statistic;
 
 import java.util.Map;
 import java.util.UUID;
+import java.util.Optional;
 import java.util.concurrent.ConcurrentHashMap;
 
 public class ClaimManager {
@@ -90,6 +91,10 @@ public class ClaimManager {
 
     public void forget(Player player) {
         snapshots.remove(player.getUniqueId());
+    }
+
+    public Optional<PointsSnapshot> getCachedSnapshot(UUID player) {
+        return Optional.ofNullable(snapshots.get(player));
     }
 
     public int getPointsPerHourFromGroup(Player player) {

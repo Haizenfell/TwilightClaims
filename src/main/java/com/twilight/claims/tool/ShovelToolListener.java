@@ -1,9 +1,11 @@
 package com.twilight.claims.tool;
 
 import com.sk89q.worldedit.math.BlockVector3;
-import com.sk89q.worldguard.protection.regions.ProtectedCuboidRegion;
 import com.sk89q.worldguard.protection.regions.ProtectedRegion;
 import com.twilight.claims.TwilightClaims;
+import com.twilight.claims.api.ClaimBounds;
+import com.twilight.claims.api.ClaimKey;
+import com.twilight.claims.api.ClaimOperationException;
 import com.twilight.claims.config.ClaimsConfig;
 import com.twilight.claims.config.Messages;
 import com.twilight.claims.manager.ClaimManager;
@@ -299,15 +301,17 @@ public class ShovelToolListener implements Listener {
             return;
         }
 
-        ProtectedRegion nr = new ProtectedCuboidRegion(old.getId(), newMin, newMax);
-        nr.copyFrom(old);
-
-        manager.addRegion(nr);
-        if (!wg.save(world)) {
-            manager.addRegion(old);
-            sendAction(player, msg.msg("region_save_failed"));
+        ProtectedRegion nr;
+        try {
+            var updated = TwilightClaims.getInstance().getApi().resizeClaim(new ClaimKey(world.getUID(), old.getId()),
+                    new ClaimBounds(newMin.x(), newMin.y(), newMin.z(), newMax.x(), newMax.y(), newMax.z()), true);
+            nr = wg.getClaim(updated.key().worldId(), updated.key().regionId());
+        } catch (ClaimOperationException exception) {
+            sendAction(player, msg.msg(exception.getReason() == ClaimOperationException.Reason.CANCELLED
+                    ? "claim_action_cancelled" : "region_save_failed"));
             return;
         }
+        if (nr == null) return;
 
         String text = formatRegionMessage(msg.msg("moved_corner"), player, nr)
                 .replace("%area%", String.valueOf(newArea));
